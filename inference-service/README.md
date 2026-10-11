@@ -14,6 +14,8 @@ the repository. `/health` is intentionally unauthenticated so Render can probe i
 ## Render setup
 
 1. Create a Render Web Service from this repository. Do not commit the checkpoint.
+   The repository pins Render to Python 3.12.6 in `runtime.txt`; keep that runtime
+   aligned with the tested Torch/TorchVision environment.
 2. Configure these Render environment variables:
 - `INFERENCE_SERVICE_API_KEY`: a long random value, stored as a secret.
 - `HF_TOKEN`: a Hugging Face token with read access to the private model repository, stored as a secret.

@@ -2,3 +2,10 @@ node_modules
 .next
 .env.local
 out
+datasets/
+*.pt
+*.pth
+*.onnx
+ml/runs/
+ml/artifacts/
+.venv-training/

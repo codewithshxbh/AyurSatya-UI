@@ -17,7 +17,24 @@ export async function GET() {
     console.error("Analysis history lookup failed", error);
     return NextResponse.json({ error: "Unable to load analysis history." }, { status: 500 });
   }
-  return NextResponse.json({ analyses: data || [] });
+  const { count, error: countError } = await supabaseServer
+    .from("analyses")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  if (countError) {
+    console.error("Analysis count lookup failed", countError);
+    return NextResponse.json({ error: "Unable to load analysis history." }, { status: 500 });
+  }
+  const { count: validated, error: validatedError } = await supabaseServer
+    .from("analyses")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .not("result->visual->>disease", "is", null);
+  if (validatedError) {
+    console.error("Validated analysis count lookup failed", validatedError);
+    return NextResponse.json({ error: "Unable to load analysis history." }, { status: 500 });
+  }
+  return NextResponse.json({ analyses: data || [], total: count || 0, validated: validated || 0 });
 }
 
 export async function POST(request) {

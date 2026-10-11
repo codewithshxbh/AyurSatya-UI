@@ -184,6 +184,31 @@ function NavButton({ icon: Icon, label, active, onClick }) {
 }
 
 function Overview({ firstName, setActiveView, setSelectedCrop }) {
+  const [analyses, setAnalyses] = useState([]);
+  const [totalAnalyses, setTotalAnalyses] = useState(0);
+  const [validatedAnalyses, setValidatedAnalyses] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const loadOverview = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const response = await fetch("/api/analyses", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load analysis history.");
+      setAnalyses(payload.analyses || []);
+      setTotalAnalyses(payload.total ?? payload.analyses?.length ?? 0);
+      setValidatedAnalyses(payload.validated ?? 0);
+    } catch (error) {
+      console.error("Overview analysis lookup failed", error);
+      setHistoryError("Analysis activity is temporarily unavailable.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
   const now = new Date();
   const dateLabel = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
@@ -195,10 +220,10 @@ function Overview({ firstName, setActiveView, setSelectedCrop }) {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   return <section className="page">
     <div className="page-heading"><div><p className="overline">{dateLabel}</p><h1>{greeting}, {firstName}.</h1><p className="lead">A clear view of the work happening in your crop workspace.</p></div><button className="button button-primary" onClick={() => setActiveView("analysis")}><Plus size={17} /> New analysis</button></div>
-    <div className="stats"><Stat label="Total analyses" value="0" detail="Run your first analysis" icon={BarChart3} /><Stat label="Validated results" value="0" detail="No saved model reports yet" icon={CheckCircle2} /><Stat label="Supported crops" value={crops.length} detail="Verified from the local dataset" icon={Leaf} /></div>
+    <div className="stats"><Stat label="Total analyses" value={historyLoading ? "—" : totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} icon={BarChart3} /><Stat label="Validated results" value={historyLoading ? "—" : validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} icon={CheckCircle2} /><Stat label="Supported crops" value={crops.length} detail="Verified from the local dataset" icon={Leaf} /></div>
     <div className="section-title"><div><h2>Start with a crop</h2><p>Select a crop to begin a new analysis.</p></div><button className="link-button" onClick={() => setActiveView("analysis")}>View all crops <ArrowRight size={15} /></button></div>
     <div className="crop-grid">{crops.map((crop) => <button key={crop.name} className="crop-card" onClick={() => { setSelectedCrop(crop.name); setActiveView("analysis"); }}><div className={`crop-image ${crop.color}`}><Leaf size={42} strokeWidth={1.2} /></div><span><strong>{crop.name}</strong><small>{crop.scientific}</small></span><ArrowRight size={16} /></button>)}</div>
-    <div className="content-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent analyses</h2><p>Your saved crop intelligence reports.</p></div><button className="link-button" onClick={() => setActiveView("history")}>See history <ArrowRight size={15} /></button></div><div className="empty-state"><History size={20} /><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div></div><div className="panel note-panel"><p className="overline">FIELD NOTE</p><h2>Good images create better answers.</h2><p>Use natural light, a plain background, and show the whole leaf whenever possible.</p><button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image <ArrowRight size={15} /></button></div></div>
+    <div className="content-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent analyses</h2><p>Your saved crop intelligence reports.</p></div><button className="link-button" onClick={() => setActiveView("history")}>See history <ArrowRight size={15} /></button></div>{historyLoading ? <div className="empty-state"><span>Loading your saved analyses...</span></div> : historyError ? <div className="empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div> : analyses.length ? <div className="overview-recent-list">{analyses.slice(0, 3).map((item, index) => <AnalysisRow key={item.id || `${item.crop_name}-${index}`} item={{ id: item.id, crop: item.crop_name, createdAt: item.created_at, date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), status: item.result?.visual?.disease || "Analyzed", confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—", color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage", imageUrls: getAnalysisImageUrls(item), result: item.result || {} }} onOpen={() => setActiveView("history")} />)}</div> : <div className="empty-state"><History size={20} /><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>}</div><div className="panel note-panel"><p className="overline">FIELD NOTE</p><h2>Good images create better answers.</h2><p>Use natural light, a plain background, and show the whole leaf whenever possible.</p><button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image <ArrowRight size={15} /></button></div></div>
   </section>;
 }
 

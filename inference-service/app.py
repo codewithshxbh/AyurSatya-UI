@@ -22,6 +22,22 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_IMAGE_BYTES + 512 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png"}
 ARTIFACTS_DIR = Path(os.environ.get("INFERENCE_ARTIFACTS_DIR", REPOSITORY_ROOT / "ml" / "artifacts"))
+REQUIRED_ARTIFACTS = (
+    "best_efficientnet_b0.pt",
+    "class_to_index.json",
+    "training_config.json",
+)
+
+
+def _artifact_directory() -> Path:
+    configured = os.environ.get("INFERENCE_ARTIFACTS_DIR")
+    return Path(configured) if configured else ARTIFACTS_DIR
+
+
+def _missing_artifacts(artifacts_dir: Path) -> list[str]:
+    if not artifacts_dir.is_dir():
+        return list(REQUIRED_ARTIFACTS)
+    return [name for name in REQUIRED_ARTIFACTS if not (artifacts_dir / name).is_file()]
 
 
 def _api_key_is_valid() -> bool:
@@ -57,14 +73,26 @@ def _decode_upload(file_storage):
 
 @app.get("/health")
 def health():
+    artifacts_dir = _artifact_directory()
+    missing = _missing_artifacts(artifacts_dir)
+    if missing:
+        return jsonify({
+            "status": "not_ready",
+            "modelReady": False,
+            "error": "Required EfficientNet-B0 artifacts are missing.",
+            "missingArtifacts": missing,
+        }), 503
     try:
         from ml.inference import load_checkpoint
 
-        load_checkpoint(ARTIFACTS_DIR)
-    except FileNotFoundError:
-        return jsonify({"status": "not_ready", "modelReady": False, "error": "EfficientNet-B0 checkpoint artifacts are unavailable."}), 503
-    except Exception as error:
-        return jsonify({"status": "not_ready", "modelReady": False, "error": str(error)}), 503
+        load_checkpoint(artifacts_dir)
+    except Exception:
+        app.logger.exception("EfficientNet-B0 artifact validation failed")
+        return jsonify({
+            "status": "not_ready",
+            "modelReady": False,
+            "error": "EfficientNet-B0 artifacts are invalid or incompatible.",
+        }), 503
     return jsonify({"status": "ready", "modelReady": True, "model": "EfficientNet-B0"})
 
 
@@ -75,16 +103,21 @@ def predict():
     image_data, validation_error = _decode_upload(request.files.get("file"))
     if validation_error:
         return _error(validation_error, 400)
+    artifacts_dir = _artifact_directory()
+    missing = _missing_artifacts(artifacts_dir)
+    if missing:
+        return _error("EfficientNet-B0 artifacts are unavailable.", 503)
     try:
-        result = run_inference(image_data, ARTIFACTS_DIR)
+        result = run_inference(image_data, artifacts_dir)
         return jsonify({
             "className": result["className"],
             "confidence": result["confidence"],
             "gradcamDataUrl": result["gradcamDataUrl"],
             "model": "EfficientNet-B0",
         })
-    except FileNotFoundError:
-        return _error("EfficientNet-B0 checkpoint artifacts are unavailable.", 503)
+    except (FileNotFoundError, KeyError, ValueError):
+        app.logger.exception("EfficientNet-B0 artifacts are invalid or unavailable")
+        return _error("EfficientNet-B0 artifacts are invalid or unavailable.", 503)
     except Exception:
         app.logger.exception("EfficientNet-B0 inference failed")
         return _error("EfficientNet-B0 inference failed.", 502)

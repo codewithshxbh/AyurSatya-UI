@@ -9,4 +9,4 @@ services:
       - key: INFERENCE_SERVICE_API_KEY
         sync: false
       - key: INFERENCE_ARTIFACTS_DIR
-        value: /opt/render/project/src/ml/artifacts
+        sync: false

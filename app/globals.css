@@ -203,3 +203,4 @@
 .review-theme .report-section .gradcam-placeholder{color:#405d54}
 .review-theme .report-section .gradcam-placeholder strong{color:#29443e}
 .provider-status{display:flex;align-items:center;gap:14px;margin:12px 0 16px}
+.provider-status + .field{gap:10px;margin-top:4px}

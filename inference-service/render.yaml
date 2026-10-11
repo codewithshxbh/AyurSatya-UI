@@ -1,7 +1,10 @@
 services:
   - type: web
     name: ayursatya-inference
-    runtime: python
+  # EfficientNet-B0 + PyTorch exceeds the 512 MB Free instance during a
+  # forward pass even though artifact readiness succeeds.
+  plan: starter
+  runtime: python
     buildCommand: python --version && pip install -r inference-service/requirements.txt && python inference-service/download_artifacts.py
     startCommand: python --version && gunicorn --chdir inference-service --workers 1 --timeout 180 --bind 0.0.0.0:$PORT app:app
     # Keep deployment health checks lightweight. Model validation remains

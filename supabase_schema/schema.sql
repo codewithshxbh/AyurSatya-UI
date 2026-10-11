@@ -37,8 +37,6 @@ CREATE TABLE public.knowledge_records (
   source_locator text,
   original_language_text text,
   verified_translation text,
-  verification_status text NOT NULL DEFAULT 'needs_review'::text CHECK (verification_status = ANY (ARRAY['verified'::text, 'needs_review'::text, 'rejected'::text])),
-  reviewer_notes text,
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   source_record_id text,
   CONSTRAINT knowledge_records_pkey PRIMARY KEY (id)

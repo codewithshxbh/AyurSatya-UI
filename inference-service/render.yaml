@@ -17,3 +17,7 @@ services:
         value: shubh1206/ayursatya-model
       - key: HF_TOKEN
         sync: false
+      - key: TORCH_NUM_THREADS
+        value: "1"
+      - key: TORCH_INTEROP_THREADS
+        value: "1"

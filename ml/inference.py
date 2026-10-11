@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -13,6 +14,9 @@ import torch
 from PIL import Image, UnidentifiedImageError
 from torch import nn
 from torchvision import models, transforms
+
+torch.set_num_threads(max(1, int(os.environ.get("TORCH_NUM_THREADS", "1"))))
+torch.set_num_interop_threads(max(1, int(os.environ.get("TORCH_INTEROP_THREADS", "1"))))
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -132,10 +136,9 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
             maximum = cam.max()
             if float(maximum.detach()) > 0:
                 cam /= maximum
-            heatmap = (cam.mul(255).byte()).numpy()
-            overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-            pixels = [(255, 48, 48, int(value * 0.55)) for value in heatmap.reshape(-1)]
-            overlay.putdata(pixels)
+            heatmap = (cam.mul(140).byte()).numpy()
+            overlay = Image.new("RGBA", image.size, (255, 48, 48, 0))
+            overlay.putalpha(Image.fromarray(heatmap, mode="L"))
             blended = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
             output = io.BytesIO()
             blended.save(output, format="PNG")

@@ -34,6 +34,10 @@ def build_model(class_count: int) -> nn.Module:
     return model
 
 
+def _use_half_precision() -> bool:
+    return os.environ.get("TORCH_DTYPE", "float32").lower() in {"float16", "half"}
+
+
 def _load_checkpoint_uncached(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
     artifacts_dir = artifacts_dir.resolve()
     checkpoint_path = artifacts_dir / "best_efficientnet_b0.pt"
@@ -62,6 +66,8 @@ def _load_checkpoint_uncached(artifacts_dir: Path) -> tuple[nn.Module, list[str]
     model = build_model(len(labels))
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
+    if _use_half_precision():
+        model.half()
     return model, labels, image_size
 
 
@@ -104,6 +110,8 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])
     tensor = preprocess(image).unsqueeze(0)
+    if _use_half_precision():
+        tensor = tensor.half()
     if os.environ.get("ENABLE_GRADCAM", "1").lower() not in {"1", "true", "yes"}:
         with torch.inference_mode():
             probabilities = torch.softmax(model(tensor), dim=1)

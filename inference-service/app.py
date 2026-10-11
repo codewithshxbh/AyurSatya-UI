@@ -15,7 +15,7 @@ from PIL import Image, UnidentifiedImageError
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from ml.inference import run_inference  # noqa: E402
+from ml.inference import is_checkpoint_cached, load_checkpoint, run_inference  # noqa: E402
 
 app = Flask(__name__)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -73,6 +73,20 @@ def _decode_upload(file_storage):
 
 @app.get("/health")
 def health():
+    """Liveness check; never performs model initialization."""
+    artifacts_dir = _artifact_directory()
+    missing = _missing_artifacts(artifacts_dir)
+    return jsonify({
+        "status": "ok",
+        "modelReady": not missing and is_checkpoint_cached(artifacts_dir),
+        "model": "EfficientNet-B0",
+        **({"missingArtifacts": missing} if missing else {}),
+    })
+
+
+@app.get("/ready")
+def ready():
+    """Readiness check; initializes the model once and reports compatibility."""
     artifacts_dir = _artifact_directory()
     missing = _missing_artifacts(artifacts_dir)
     if missing:
@@ -83,8 +97,6 @@ def health():
             "missingArtifacts": missing,
         }), 503
     try:
-        from ml.inference import load_checkpoint
-
         load_checkpoint(artifacts_dir)
     except Exception:
         app.logger.exception("EfficientNet-B0 artifact validation failed")

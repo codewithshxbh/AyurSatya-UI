@@ -2,7 +2,9 @@
 
 This is a separate Flask service for Render. It reuses [`ml/inference.py`](../ml/inference.py) and exposes:
 
-- `GET /health` — reports whether the checkpoint and companion artifacts are ready.
+- `GET /health` — lightweight unauthenticated liveness check; it never loads the model.
+- `GET /ready` — unauthenticated readiness check; loads and validates the model once per
+  Gunicorn worker, then reuses the cached model.
 - `POST /predict` — accepts a JPG or PNG multipart field named `file`.
 
 `POST /predict` requires either `X-API-Key: <INFERENCE_SERVICE_API_KEY>` or
@@ -22,8 +24,8 @@ the repository. `/health` is intentionally unauthenticated so Render can probe i
 It downloads exactly these files:
 `best_efficientnet_b0.pt`, `class_to_index.json`, and `training_config.json`.
 4. Use the included `render.yaml`, or set:
-- Start: `gunicorn --chdir inference-service --bind 0.0.0.0:$PORT app:app`
-5. Verify `GET /health` reports `{"status":"ready","modelReady":true}` before configuring the web app.
+- Start: `gunicorn --chdir inference-service --workers 1 --timeout 180 --bind 0.0.0.0:$PORT app:app`
+5. Verify `GET /ready` reports `{"status":"ready","modelReady":true}` before configuring the web app.
 
 ## Secure artifact workflow
 
@@ -36,9 +38,9 @@ token in a URL or print the token. The Hugging Face repository must be private,
 and the token must be read-only and scoped to that repository. Rotate the token
 through Render's secret environment-variable settings, not through source control.
 The build fails with a sanitized error if the token, repository access, directory,
-or any required artifact is missing. Until a successful build provisions the files,
-`/health` returns `503` with `modelReady: false` and `/predict` returns `503`; the
-service never fabricates a result.
+or any required artifact is missing. Until a successful build provisions the files, `/ready` and `/predict` return `503`;
+the service never fabricates a result. `/health` remains a liveness response even when
+the model is not ready.
 
 The repository's `.gitignore` excludes model artifacts. A Render deployment created
 from the repository alone is therefore not ready to predict until the three artifact

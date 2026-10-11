@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import sys
+import threading
 from pathlib import Path
 
 import torch
@@ -16,6 +17,10 @@ from torchvision import models, transforms
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 DEFAULT_ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
+_MODEL_CACHE_KEY: str | None = None
+_MODEL_CACHE_VALUE: tuple[nn.Module, list[str], int] | None = None
+_MODEL_CACHE_LOCK = threading.Lock()
+_INFERENCE_LOCK = threading.Lock()
 
 
 def build_model(class_count: int) -> nn.Module:
@@ -24,7 +29,8 @@ def build_model(class_count: int) -> nn.Module:
     return model
 
 
-def load_checkpoint(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
+def _load_checkpoint_uncached(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
+    artifacts_dir = artifacts_dir.resolve()
     checkpoint_path = artifacts_dir / "best_efficientnet_b0.pt"
     mapping_path = artifacts_dir / "class_to_index.json"
     config_path = artifacts_dir / "training_config.json"
@@ -52,6 +58,23 @@ def load_checkpoint(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
     return model, labels, image_size
+
+
+def load_checkpoint(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
+    global _MODEL_CACHE_KEY, _MODEL_CACHE_VALUE
+    cache_key = str(artifacts_dir.resolve())
+    if _MODEL_CACHE_KEY == cache_key and _MODEL_CACHE_VALUE is not None:
+        return _MODEL_CACHE_VALUE
+    with _MODEL_CACHE_LOCK:
+        if _MODEL_CACHE_KEY == cache_key and _MODEL_CACHE_VALUE is not None:
+            return _MODEL_CACHE_VALUE
+        _MODEL_CACHE_VALUE = _load_checkpoint_uncached(artifacts_dir)
+        _MODEL_CACHE_KEY = cache_key
+        return _MODEL_CACHE_VALUE
+
+
+def is_checkpoint_cached(artifacts_dir: Path) -> bool:
+    return _MODEL_CACHE_KEY == str(artifacts_dir.resolve()) and _MODEL_CACHE_VALUE is not None
 
 
 def decode_image(image_data: str) -> Image.Image:
@@ -86,41 +109,42 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
         nonlocal gradients
         gradients = grad_output[0]
 
-    target_layer = model.features[-1]
-    activation_hook = target_layer.register_forward_hook(save_activations)
-    gradient_hook = target_layer.register_full_backward_hook(save_gradients)
-    try:
-        model.zero_grad(set_to_none=True)
-        logits = model(tensor)
-        probabilities = torch.softmax(logits, dim=1)
-        class_index = int(probabilities.argmax(dim=1).item())
-        score = logits[0, class_index]
-        score.backward()
-        if activations is None or gradients is None:
-            raise RuntimeError("Grad-CAM activations were not captured.")
-        weights = gradients.mean(dim=(2, 3), keepdim=True)
-        cam = torch.relu((weights * activations).sum(dim=1, keepdim=True))
-        cam = torch.nn.functional.interpolate(cam, size=image.size[::-1], mode="bilinear", align_corners=False)
-        cam = cam[0, 0]
-        cam -= cam.min()
-        maximum = cam.max()
-        if float(maximum.detach()) > 0:
-            cam /= maximum
-        heatmap = (cam.mul(255).byte()).numpy()
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        pixels = [(255, 48, 48, int(value * 0.55)) for value in heatmap.reshape(-1)]
-        overlay.putdata(pixels)
-        blended = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
-        output = io.BytesIO()
-        blended.save(output, format="PNG")
-        return {
-            "className": labels[class_index],
-            "confidence": float(probabilities[0, class_index].item()),
-            "gradcamDataUrl": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii"),
-        }
-    finally:
-        activation_hook.remove()
-        gradient_hook.remove()
+    with _INFERENCE_LOCK:
+        target_layer = model.features[-1]
+        activation_hook = target_layer.register_forward_hook(save_activations)
+        gradient_hook = target_layer.register_full_backward_hook(save_gradients)
+        try:
+            model.zero_grad(set_to_none=True)
+            logits = model(tensor)
+            probabilities = torch.softmax(logits, dim=1)
+            class_index = int(probabilities.argmax(dim=1).item())
+            score = logits[0, class_index]
+            score.backward()
+            if activations is None or gradients is None:
+                raise RuntimeError("Grad-CAM activations were not captured.")
+            weights = gradients.mean(dim=(2, 3), keepdim=True)
+            cam = torch.relu((weights * activations).sum(dim=1, keepdim=True))
+            cam = torch.nn.functional.interpolate(cam, size=image.size[::-1], mode="bilinear", align_corners=False)
+            cam = cam[0, 0]
+            cam -= cam.min()
+            maximum = cam.max()
+            if float(maximum.detach()) > 0:
+                cam /= maximum
+            heatmap = (cam.mul(255).byte()).numpy()
+            overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+            pixels = [(255, 48, 48, int(value * 0.55)) for value in heatmap.reshape(-1)]
+            overlay.putdata(pixels)
+            blended = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+            output = io.BytesIO()
+            blended.save(output, format="PNG")
+            return {
+                "className": labels[class_index],
+                "confidence": float(probabilities[0, class_index].item()),
+                "gradcamDataUrl": "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii"),
+            }
+        finally:
+            activation_hook.remove()
+            gradient_hook.remove()
 
 
 def main() -> None:

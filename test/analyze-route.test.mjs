@@ -142,17 +142,15 @@ test("Colab status distinguishes configuration, malformed responses, errors, and
   }), "unconfigured");
   assert.equal(await checkColabAvailability({ url: "https://colab.example" }, async () => ({
     ok: true,
-    json: async () => ({ status: "ok", modelReady: true })
+    text: async () => JSON.stringify({ status: "ok", modelReady: true })
   })), "available");
   assert.equal(await checkColabAvailability({ url: "https://expired.example" }, async () => ({
     ok: false,
-    json: async () => ({ error: "expired tunnel" })
+    text: async () => JSON.stringify({ error: "expired tunnel" })
   })), "offline");
   assert.equal(await checkColabAvailability({ url: "https://malformed.example" }, async () => ({
     ok: true,
-    json: async () => {
-      throw new SyntaxError("invalid JSON");
-    }
+    text: async () => "<html>not json</html>"
   })), "offline");
   assert.equal(await checkColabAvailability({ url: "https://timeout.example" }, async () => {
     throw Object.assign(new Error("timed out"), { name: "TimeoutError" });

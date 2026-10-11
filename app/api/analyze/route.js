@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth-server";
-import { runHostedInference } from "../../../lib/hosted-inference";
+import { isInferenceProvider, runInferenceProvider } from "../../../lib/inference-providers";
 import { getInferenceAvailability, runEfficientNetInference } from "../../../lib/model-inference";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
 
@@ -14,12 +14,13 @@ export async function POST(request) {
     } catch {
       return NextResponse.json({ error: "Send a valid JSON body with crop and image data." }, { status: 400 });
     }
-    const { cropName, imageData, imageUrl, latitude, longitude } = input;
+    const { cropName, imageData, imageUrl, latitude, longitude, provider = "render" } = input;
+    if (!isInferenceProvider(provider)) return NextResponse.json({ error: "The selected inference provider is not supported." }, { status: 400 });
     if (!cropName || !imageData) return NextResponse.json({ error: "Crop and image are required." }, { status: 400 });
     if (!/^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(imageData) || imageData.length > 14 * 1024 * 1024) {
       return NextResponse.json({ error: "Only valid JPG or PNG image data up to 10 MB is accepted." }, { status: 400 });
     }
-    const visual = await getVisualResult(cropName, imageData);
+    const visual = await getVisualResult(cropName, imageData, provider);
     const satellite = await getSatelliteContext(latitude, longitude);
     const knowledge = await getKnowledgeRecord(cropName, visual.disease);
     return NextResponse.json({
@@ -35,33 +36,34 @@ export async function POST(request) {
   }
 }
 
-async function getVisualResult(cropName, imageData) {
-  if (process.env.INFERENCE_SERVICE_URL) {
+async function getVisualResult(cropName, imageData, provider = "render") {
+  if ((provider === "render" && process.env.INFERENCE_SERVICE_URL) || (provider === "colab" && process.env.COLAB_INFERENCE_URL)) {
     try {
-      const prediction = await runHostedInference(imageData);
-      return createPredictionResult(cropName, prediction);
+      const prediction = await runInferenceProvider(provider, imageData);
+      return createPredictionResult(cropName, prediction, provider);
     } catch (error) {
       console.error("Hosted EfficientNet-B0 inference failed", error);
       return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable.");
     }
   }
+  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.");
   const availability = getInferenceAvailability();
   if (!availability.available) return createUnavailableModelResult(cropName, availability.reason);
   try {
     const prediction = await runEfficientNetInference(imageData);
-    return createPredictionResult(cropName, prediction);
+    return createPredictionResult(cropName, prediction, "render");
   } catch (error) {
     console.error("EfficientNet-B0 inference failed", error);
     return createUnavailableModelResult(cropName, "The EfficientNet-B0 checkpoint could not produce a prediction.");
   }
 }
 
-export function createPredictionResult(cropName, prediction) {
+export function createPredictionResult(cropName, prediction, provider = "render") {
   const [crop, ...diseaseParts] = prediction.className.split("_");
   if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
     return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");
   }
-  const hosted = Boolean(process.env.INFERENCE_SERVICE_URL);
+  const hosted = provider === "render" || provider === "colab";
   const hasGradcam = typeof prediction.gradcamDataUrl === "string" && prediction.gradcamDataUrl.startsWith("data:image/");
   return {
     disease: diseaseParts.join(" "),
@@ -70,7 +72,7 @@ export function createPredictionResult(cropName, prediction) {
     explanation: "The prediction and Grad-CAM overlay were generated from the configured EfficientNet-B0 checkpoint.",
     evidence: [],
     limitations: "This diagnostic checkpoint prediction is not a medical or agronomic confirmation and is not production-ready.",
-    model: { provider: "EfficientNet-B0", status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt", runtime: hosted ? "hosted" : "local" },
+    model: { provider: "EfficientNet-B0", inferenceProvider: provider, status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt", runtime: hosted ? "hosted" : "local" },
     explainability: hasGradcam
       ? { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
       : { status: "unavailable", message: "The hosted prediction completed, but Grad-CAM is disabled for the constrained inference runtime." }

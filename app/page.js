@@ -238,6 +238,23 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [satelliteContext, setSatelliteContext] = useState("none");
+  const [provider, setProvider] = useState("render");
+  const [colabStatus, setColabStatus] = useState("");
+  const [colabChecking, setColabChecking] = useState(false);
+  async function checkColabStatus() {
+    setColabChecking(true);
+    try {
+      const response = await fetch("/api/inference/colab-status", { cache: "no-store" });
+      const payload = await response.json();
+      setColabStatus(payload.status || "offline");
+      return payload.status === "available";
+    } catch {
+      setColabStatus("offline");
+      return false;
+    } finally {
+      setColabChecking(false);
+    }
+  }
   async function runAnalysis() {
     if (!file) return;
     if (satelliteContext === "coordinates") {
@@ -251,6 +268,10 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
     setAnalysisLoading(true);
     setUploadMessage("");
     try {
+      if (provider === "colab" && !(await checkColabStatus())) {
+        setUploadMessage("Google Colab is offline. Start the notebook runtime and tunnel, then use Check Colab again.");
+        return;
+      }
       const imageData = await fileToDataUrl(file);
       let imageUrl = null;
       setStorageStatus("Uploading original image...");
@@ -269,7 +290,7 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cropName: selectedCrop, imageData, imageUrl, latitude: satelliteContext === "coordinates" ? latitude : "", longitude: satelliteContext === "coordinates" ? longitude : "" })
+        body: JSON.stringify({ cropName: selectedCrop, imageData, imageUrl, provider, latitude: satelliteContext === "coordinates" ? latitude : "", longitude: satelliteContext === "coordinates" ? longitude : "" })
       });
       const payload = await response.json();
       if (!response.ok) setUploadMessage(payload.error || "The analysis could not be completed.");
@@ -289,7 +310,7 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
       setAnalysisLoading(false);
     }
   }
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">NEW ANALYSIS</p><h1>{analysisResult ? "Your crop report." : "Understand your crop."}</h1><p className="lead">{analysisResult ? "A combined image, knowledge, and field-context assessment." : "Upload a clear leaf image for a structured health assessment."}</p></div></div>{analysisResult ? <AnalysisResult result={analysisResult} preview={preview} onNew={() => setAnalysisResult(null)} /> : <div className="analysis-layout"><div className="panel upload-panel"><label className="field"><span>Medicinal crop</span><select value={selectedCrop} onChange={(event) => setSelectedCrop(event.target.value)}>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}><input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} /><label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><UploadCloud size={29} /><strong>Upload leaf image</strong><span>Choose a clear image from your device</span><small>JPG or PNG, up to 10 MB</small></>}</label></div><label className="field"><span>Satellite context</span><select value={satelliteContext} onChange={(event) => setSatelliteContext(event.target.value)}><option value="none">No, analyze the leaf image only</option><option value="coordinates">Yes, provide field coordinates</option></select></label>{satelliteContext === "coordinates" && <div className="location-fields"><label className="field"><span>Field latitude <small>optional</small></span><input value={latitude} onChange={(event) => setLatitude(event.target.value)} placeholder="e.g. 28.6139" /></label><label className="field"><span>Field longitude <small>optional</small></span><input value={longitude} onChange={(event) => setLongitude(event.target.value)} placeholder="e.g. 77.2090" /></label></div>}{storageStatus && <p className="privacy">{storageStatus}</p>}{uploadMessage && <p className="form-error">{uploadMessage}</p>}<button className="button button-primary full-button" disabled={!file || analysisLoading} onClick={runAnalysis}>{analysisLoading ? "Preparing report..." : "Run analysis"} {!analysisLoading && <ArrowRight size={16} />}</button><p className="privacy">Disease prediction is unavailable until the validated EfficientNet-B0 model is connected.</p></div><div className="panel process-panel"><h2>One report, three sources</h2><p>The report clearly separates what came from the image, knowledge base, and satellite context.</p><div className="process-line"><div><strong>Visual assessment</strong><small>Available after validated model integration.</small></div></div><div className="process-line"><div><strong>Ayurvedic context</strong><small>Validated crop record with source metadata.</small></div></div><div className="process-line"><div><strong>Satellite context</strong><small>Sentinel-2 scene metadata and field indicators when coordinates are supplied.</small></div></div></div></div>}</section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">NEW ANALYSIS</p><h1>{analysisResult ? "Your crop report." : "Understand your crop."}</h1><p className="lead">{analysisResult ? "A combined image, knowledge, and field-context assessment." : "Upload a clear leaf image for a structured health assessment."}</p></div></div>{analysisResult ? <AnalysisResult result={analysisResult} preview={preview} onNew={() => setAnalysisResult(null)} /> : <div className="analysis-layout"><div className="panel upload-panel"><label className="field"><span>Inference provider</span><select value={provider} onChange={(event) => { setProvider(event.target.value); setColabStatus(""); }}><option value="render">Standard Analysis (Render)</option><option value="colab">Try with Google Colab</option></select></label>{provider === "colab" && <div className="provider-status"><span className={`status ${colabStatus === "available" ? "healthy" : "review"}`}>{colabChecking ? "Checking Colab..." : colabStatus === "available" ? "Colab available" : colabStatus === "unconfigured" ? "Colab not configured" : "Colab not checked"}</span><button type="button" className="link-button" onClick={checkColabStatus} disabled={colabChecking}>{colabChecking ? "Checking..." : "Check status"}</button></div>}<label className="field"><span>Medicinal crop</span><select value={selectedCrop} onChange={(event) => setSelectedCrop(event.target.value)}>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}><input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} /><label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><UploadCloud size={29} /><strong>Upload leaf image</strong><span>Choose a clear image from your device</span><small>JPG or PNG, up to 10 MB</small></>}</label></div><label className="field"><span>Satellite context</span><select value={satelliteContext} onChange={(event) => setSatelliteContext(event.target.value)}><option value="none">No, analyze the leaf image only</option><option value="coordinates">Yes, provide field coordinates</option></select></label>{satelliteContext === "coordinates" && <div className="location-fields"><label className="field"><span>Field latitude <small>optional</small></span><input value={latitude} onChange={(event) => setLatitude(event.target.value)} placeholder="e.g. 28.6139" /></label><label className="field"><span>Field longitude <small>optional</small></span><input value={longitude} onChange={(event) => setLongitude(event.target.value)} placeholder="e.g. 77.2090" /></label></div>}{storageStatus && <p className="privacy">{storageStatus}</p>}{uploadMessage && <p className="form-error">{uploadMessage}</p>}<button className="button button-primary full-button" disabled={!file || analysisLoading || colabChecking} onClick={runAnalysis}>{analysisLoading ? "Preparing report..." : "Run analysis"} {!analysisLoading && <ArrowRight size={16} />}</button><p className="privacy">{provider === "colab" ? "Colab works only while its notebook runtime and temporary tunnel are active." : "Disease prediction uses the configured Render inference service."}</p></div><div className="panel process-panel"><h2>One report, three sources</h2><p>The report clearly separates what came from the image, knowledge base, and satellite context.</p><div className="process-line"><div><strong>Visual assessment</strong><small>Available after validated model integration.</small></div></div><div className="process-line"><div><strong>Ayurvedic context</strong><small>Validated crop record with source metadata.</small></div></div><div className="process-line"><div><strong>Satellite context</strong><small>Sentinel-2 scene metadata and field indicators when coordinates are supplied.</small></div></div></div></div>}</section>;
 }
 
 async function fileToDataUrl(file) {

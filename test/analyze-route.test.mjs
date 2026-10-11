@@ -98,3 +98,63 @@ test("hosted inference surfaces request timeouts without fabricating output", as
   await assert.rejects(() => runHostedInference(imageData), { name: "TimeoutError" });
   globalThis.fetch = originalFetch;
 });
+
+test("provider configuration keeps Render as the default and restricts providers", async () => {
+  const { getProviderConfig, isInferenceProvider } = await import("../lib/inference-providers.js");
+  process.env.INFERENCE_SERVICE_URL = "https://render.example/";
+  process.env.INFERENCE_SERVICE_API_KEY = "render-key";
+  delete process.env.COLAB_INFERENCE_URL;
+  assert.equal(isInferenceProvider("render"), true);
+  assert.equal(isInferenceProvider("colab"), true);
+  assert.equal(isInferenceProvider("https://evil.example"), false);
+  assert.deepEqual(getProviderConfig(), {
+    provider: "render",
+    url: "https://render.example",
+    apiKey: "render-key"
+  });
+  assert.equal(getProviderConfig("colab").url, null);
+});
+
+test("hosted inference can route explicitly to Colab without changing Render config", async () => {
+  let requestedUrl;
+  globalThis.fetch = async (url) => {
+    requestedUrl = url;
+    return mockResponse({
+      body: JSON.stringify({
+        className: "Neem_Healthy",
+        confidence: 0.8,
+        gradcamDataUrl: ""
+      })
+    });
+  };
+  const { runInferenceProvider } = await import("../lib/inference-providers.js");
+  process.env.COLAB_INFERENCE_URL = "https://colab.example/";
+  process.env.COLAB_INFERENCE_API_KEY = "colab-key";
+  await runInferenceProvider("colab", imageData);
+  assert.equal(requestedUrl, "https://colab.example/predict");
+  globalThis.fetch = originalFetch;
+});
+
+test("Colab status distinguishes configuration, malformed responses, errors, and availability", async () => {
+  const { checkColabAvailability } = await import("../lib/colab-status.js");
+  assert.equal(await checkColabAvailability(null, async () => {
+    throw new Error("must not fetch");
+  }), "unconfigured");
+  assert.equal(await checkColabAvailability({ url: "https://colab.example" }, async () => ({
+    ok: true,
+    json: async () => ({ status: "ok", modelReady: true })
+  })), "available");
+  assert.equal(await checkColabAvailability({ url: "https://expired.example" }, async () => ({
+    ok: false,
+    json: async () => ({ error: "expired tunnel" })
+  })), "offline");
+  assert.equal(await checkColabAvailability({ url: "https://malformed.example" }, async () => ({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError("invalid JSON");
+    }
+  })), "offline");
+  assert.equal(await checkColabAvailability({ url: "https://timeout.example" }, async () => {
+    throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
+  }), "offline");
+});

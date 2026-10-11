@@ -54,6 +54,25 @@ test("hosted inference rejects non-JSON upstream responses", async () => {
   globalThis.fetch = originalFetch;
 });
 
+test("hosted inference identifies an empty upstream response", async () => {
+  globalThis.fetch = async () => mockResponse({
+    status: 502,
+    contentType: "unknown",
+    body: ""
+  });
+  const { runHostedInference } = await import("../lib/hosted-inference.js");
+
+  await assert.rejects(
+    () => runHostedInference(imageData),
+    {
+      message:
+        "The inference service returned an empty HTTP 502 response; " +
+        "the upstream worker may have terminated before sending JSON."
+    }
+  );
+  globalThis.fetch = originalFetch;
+});
+
 test("hosted inference preserves structured upstream HTTP errors", async () => {
   globalThis.fetch = async () => mockResponse({
     status: 503,

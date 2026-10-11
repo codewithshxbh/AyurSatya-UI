@@ -24,6 +24,7 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 DEFAULT_ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
 MAX_INFERENCE_IMAGE_SIZE = (2048, 2048)
+MAX_SOURCE_IMAGE_DIMENSION = 4096
 _MODEL_CACHE_KEY: str | None = None
 _MODEL_CACHE_VALUE: tuple[nn.Module, list[str], int] | None = None
 _MODEL_CACHE_LOCK = threading.Lock()
@@ -96,12 +97,21 @@ def is_checkpoint_cached(artifacts_dir: Path) -> bool:
     return _MODEL_CACHE_KEY == str(artifacts_dir.resolve()) and _MODEL_CACHE_VALUE is not None
 
 
-def decode_image(image_data: str) -> Image.Image:
-    if not isinstance(image_data, str) or not image_data.startswith("data:image/"):
-        raise ValueError("Image data must be a data URL.")
+def decode_image(image_data: bytes | str) -> Image.Image:
     try:
-        _, encoded = image_data.split(",", 1)
-        image = Image.open(io.BytesIO(base64.b64decode(encoded, validate=True))).convert("RGB")
+        if isinstance(image_data, str):
+            if not image_data.startswith("data:image/"):
+                raise ValueError("Image data must be a data URL.")
+            _, encoded = image_data.split(",", 1)
+            image_bytes = base64.b64decode(encoded, validate=True)
+        elif isinstance(image_data, bytes):
+            image_bytes = image_data
+        else:
+            raise ValueError("Image data must be bytes or a data URL.")
+        image = Image.open(io.BytesIO(image_bytes))
+        if max(image.size) > MAX_SOURCE_IMAGE_DIMENSION:
+            raise ValueError("The uploaded image dimensions are too large.")
+        image = image.convert("RGB")
         image.load()
         image.thumbnail(MAX_INFERENCE_IMAGE_SIZE, Image.Resampling.LANCZOS)
         return image
@@ -109,7 +119,7 @@ def decode_image(image_data: str) -> Image.Image:
         raise ValueError("The uploaded image could not be decoded.") from error
 
 
-def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> dict[str, object]:
+def run_inference(image_data: bytes | str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> dict[str, object]:
     model, labels, image_size = load_checkpoint(artifacts_dir)
     image = decode_image(image_data)
     preprocess = transforms.Compose([

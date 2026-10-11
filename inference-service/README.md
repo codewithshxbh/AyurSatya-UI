@@ -31,6 +31,14 @@ It downloads exactly these files:
    not block routing while the model initializes. Verify `GET /ready` reports
    `{"status":"ready","modelReady":true}` before configuring the web app.
 
+The service is configured for a 512 MB instance: it uses one Gunicorn worker, one Torch
+thread, no Grad-CAM in hosted mode, bounded decoded image dimensions, and recycles the
+worker after each request to avoid retaining native allocator memory. If `/ready` succeeds
+but `/predict` returns an empty HTTP 502, the process is being terminated outside Flask
+(typically an instance memory limit or native Torch crash); Flask cannot return JSON after
+the worker has been killed. In that case, use a larger Render instance or inspect the
+Render worker log for `OOM`, `SIGKILL`, or a native crash.
+
 The Next.js route waits up to 180 seconds for the first hosted prediction because a
 Render Free instance may sleep and the worker may need to load EfficientNet-B0 before
 serving its first request. Set `INFERENCE_SERVICE_TIMEOUT_MS` in the Next.js environment

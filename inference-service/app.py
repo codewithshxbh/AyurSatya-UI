@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64
+import gc
 import hmac
 import io
 import os
@@ -67,8 +67,7 @@ def _decode_upload(file_storage):
         image.verify()
     except (OSError, UnidentifiedImageError):
         return None, "The uploaded image could not be decoded."
-    encoded = base64.b64encode(data).decode("ascii")
-    return f"data:{file_storage.mimetype};base64,{encoded}", None
+    return data, None
 
 
 @app.get("/health")
@@ -139,6 +138,8 @@ def predict():
     except Exception:
         app.logger.exception("EfficientNet-B0 inference failed")
         return _error("EfficientNet-B0 inference failed.", 502)
+    finally:
+        gc.collect()
 
 
 @app.errorhandler(413)

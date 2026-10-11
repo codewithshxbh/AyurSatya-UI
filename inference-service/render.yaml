@@ -2,11 +2,15 @@ services:
   - type: web
     name: ayursatya-inference
     runtime: python
-    buildCommand: pip install -r inference-service/requirements.txt
+    buildCommand: pip install -r inference-service/requirements.txt && python inference-service/download_artifacts.py
     startCommand: gunicorn --chdir inference-service --bind 0.0.0.0:$PORT app:app
     healthCheckPath: /health
     envVars:
       - key: INFERENCE_SERVICE_API_KEY
         sync: false
       - key: INFERENCE_ARTIFACTS_DIR
+        value: /opt/render/project/src/ml/artifacts
+      - key: HF_MODEL_REPO_ID
+        value: shubh1206/ayursatya-model
+      - key: HF_TOKEN
         sync: false

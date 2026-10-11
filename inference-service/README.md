@@ -12,13 +12,17 @@ the repository. `/health` is intentionally unauthenticated so Render can probe i
 ## Render setup
 
 1. Create a Render Web Service from this repository. Do not commit the checkpoint.
-2. Set `INFERENCE_SERVICE_API_KEY` to a long random value in Render's secret environment variables.
-3. Set `INFERENCE_ARTIFACTS_DIR` to the directory containing the three model
-artifacts. The required files are:
+2. Configure these Render environment variables:
+- `INFERENCE_SERVICE_API_KEY`: a long random value, stored as a secret.
+- `HF_TOKEN`: a Hugging Face token with read access to the private model repository, stored as a secret.
+- `HF_MODEL_REPO_ID`: `shubh1206/ayursatya-model`.
+- `INFERENCE_ARTIFACTS_DIR`: `/opt/render/project/src/ml/artifacts`.
+3. The build command must run from the repository root:
+`pip install -r inference-service/requirements.txt && python inference-service/download_artifacts.py`
+It downloads exactly these files:
 `best_efficientnet_b0.pt`, `class_to_index.json`, and `training_config.json`.
 4. Use the included `render.yaml`, or set:
-   - Build: `pip install -r inference-service/requirements.txt`
-   - Start: `gunicorn --chdir inference-service --bind 0.0.0.0:$PORT app:app`
+- Start: `gunicorn --chdir inference-service --bind 0.0.0.0:$PORT app:app`
 5. Verify `GET /health` reports `{"status":"ready","modelReady":true}` before configuring the web app.
 
 ## Secure artifact workflow
@@ -27,23 +31,14 @@ The local files under `ml/artifacts/` are ignored by Git and must remain that wa
 Do not put the `.pt` file in a public bucket, a GitHub release, a client-visible
 environment variable, or a repository secret that is echoed into build logs.
 
-Before implementing an artifact download mechanism, choose a private object-storage
-provider that supports server-side credentials and short-lived signed access, such as
-an S3-compatible bucket, Azure Blob Storage, or Google Cloud Storage. The owner must
-configure:
-
-- a private bucket/container containing the three required files;
-- a narrowly scoped read-only identity for only those files;
-- a server-side secret or platform-managed identity for the Render service;
-- TLS-only access, audit logging, and key rotation; and
-- a build or startup step that copies the files into the directory named by
-  `INFERENCE_ARTIFACTS_DIR` without printing the URL, token, or file contents.
-
-No downloader is included yet because selecting the provider, identity mechanism,
-retention policy, and Render secret delivery method is an infrastructure decision.
-Until those files are provisioned into the configured directory, `/health` returns
-`503` with `modelReady: false` and `/predict` returns `503`; the service never
-fabricates a result.
+The build downloader uses Hugging Face Hub's authenticated API; it does not put a
+token in a URL or print the token. The Hugging Face repository must be private,
+and the token must be read-only and scoped to that repository. Rotate the token
+through Render's secret environment-variable settings, not through source control.
+The build fails with a sanitized error if the token, repository access, directory,
+or any required artifact is missing. Until a successful build provisions the files,
+`/health` returns `503` with `modelReady: false` and `/predict` returns `503`; the
+service never fabricates a result.
 
 The repository's `.gitignore` excludes model artifacts. A Render deployment created
 from the repository alone is therefore not ready to predict until the three artifact

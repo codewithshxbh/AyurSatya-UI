@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth-server";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
-import { normalizeLegacyRecords, parseKnowledgeFilters } from "../../../lib/knowledge-filters.mjs";
+import { normalizeKnowledgeCrop, normalizeLegacyRecords, parseKnowledgeFilters } from "../../../lib/knowledge-filters.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +18,21 @@ export async function GET(request) {
   let query = supabaseServer
     .from("knowledge_records")
     .select("id,crop_name,normalized_crop,matched_disease,record_type,information,summary,source_title,source_url,source_institution,publication_date,source_locator,original_language_text,verified_translation,created_at,updated_at");
-  if (crop) query = query.eq("crop_name", crop);
+  if (crop) query = query.eq("normalized_crop", normalizeKnowledgeCrop(crop));
   if (disease) query = query.eq("matched_disease", disease);
   if (recordType) query = query.eq("record_type", recordType);
   query = query.order("crop_name", { ascending: true }).order("matched_disease", { ascending: true }).limit(100);
 
   let { data, error } = await query;
+  if (!error && crop && !(data || []).length) {
+    let legacyCropQuery = supabaseServer
+      .from("knowledge_records")
+      .select("id,crop_name,normalized_crop,matched_disease,record_type,information,summary,source_title,source_url,source_institution,publication_date,source_locator,original_language_text,verified_translation,created_at,updated_at")
+      .eq("crop_name", crop);
+    if (disease) legacyCropQuery = legacyCropQuery.eq("matched_disease", disease);
+    if (recordType) legacyCropQuery = legacyCropQuery.eq("record_type", recordType);
+    ({ data, error } = await legacyCropQuery.order("crop_name", { ascending: true }).order("matched_disease", { ascending: true }).limit(100));
+  }
   if (error && (error.code === "42703" || error.message?.toLowerCase().includes("column"))) {
     let legacyQuery = supabaseServer
       .from("knowledge_records")

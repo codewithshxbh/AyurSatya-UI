@@ -3,6 +3,7 @@ import { getCurrentUser } from "../../../lib/auth-server";
 import { isInferenceProvider, runInferenceProvider } from "../../../lib/inference-providers";
 import { getInferenceAvailability, runEfficientNetInference } from "../../../lib/model-inference";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
+import { normalizeKnowledgeCrop, selectKnowledgeRecord } from "../../../lib/knowledge-filters.mjs";
 
 export async function POST(request) {
   try {
@@ -97,25 +98,22 @@ async function getKnowledgeRecord(cropName, disease) {
     try {
       const diseaseLookup = supabaseServer
         .from("knowledge_records")
-        .select("information,source_title,source_url,matched_disease")
-        .eq("crop_name", cropName)
-        .eq("matched_disease", disease || "General")
-        .limit(1)
-        .maybeSingle();
+        .select("information,summary,source_title,source_url,source_institution,matched_disease")
+        .eq("normalized_crop", normalizeKnowledgeCrop(cropName))
+        .limit(100);
       const timeout = new Promise((resolve) => setTimeout(() => resolve({ data: null, error: new Error("Knowledge lookup timed out") }), 2500));
       let { data, error } = await Promise.race([diseaseLookup, timeout]);
-      if (!error && !data && disease) {
-        const generalLookup = supabaseServer
+      if (!error && !(data || []).length) {
+        const legacyLookup = supabaseServer
           .from("knowledge_records")
-          .select("information,source_title,source_url,matched_disease")
+          .select("information,summary,source_title,source_url,source_institution,matched_disease")
           .eq("crop_name", cropName)
-          .eq("matched_disease", "General")
-          .limit(1)
-          .maybeSingle();
-        ({ data, error } = await Promise.race([generalLookup, timeout]));
+          .limit(100);
+        ({ data, error } = await Promise.race([legacyLookup, timeout]));
       }
-      if (!error && data) {
-        return { information: data.information, source: data.source_title, sourceUrl: data.source_url, matchedDisease: data.matched_disease, match: "supabase validated record" };
+      const match = !error ? selectKnowledgeRecord(data || [], disease) : null;
+      if (!error && match) {
+        return { information: match.summary || match.information, source: match.source_title, sourceInstitution: match.source_institution || null, sourceUrl: match.source_url, matchedDisease: match.matched_disease, match: match.matched_disease?.toLowerCase() === disease?.toLowerCase() ? "disease-specific" : "general" };
       }
       if (error) console.error("Knowledge retrieval failed", error);
     } catch (error) {
@@ -123,8 +121,9 @@ async function getKnowledgeRecord(cropName, disease) {
     }
   }
   return {
-    information: "No validated knowledge record matched this crop and disease.",
+    information: "No knowledge record matched this crop and disease.",
     source: null,
+    sourceInstitution: null,
     sourceUrl: null,
     matchedDisease: disease || null,
     match: "none"

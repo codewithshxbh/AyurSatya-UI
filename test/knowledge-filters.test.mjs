@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeLegacyRecords, parseKnowledgeFilters } from "../lib/knowledge-filters.mjs";
+import { normalizeKnowledgeCrop, normalizeLegacyRecords, parseKnowledgeFilters, selectKnowledgeRecord } from "../lib/knowledge-filters.mjs";
 
 function filters(query = "") {
   return parseKnowledgeFilters(new URLSearchParams(query));
@@ -8,6 +8,28 @@ function filters(query = "") {
 
 test("parses knowledge filters without a verification workflow", () => {
   assert.deepEqual(filters().filters, { crop: "", disease: "", recordType: "" });
+});
+
+test("normalizes classifier plant names to database crop keys", () => {
+  assert.equal(normalizeKnowledgeCrop("Neem"), "azadirachta_indica");
+  assert.equal(normalizeKnowledgeCrop("Tulsi"), "ocimum_tenuiflorum");
+  assert.equal(normalizeKnowledgeCrop("Kalanchoe"), "kalanchoe_pinnata");
+});
+
+test("prefers disease-specific knowledge and falls back to general", () => {
+  const records = [
+    { matched_disease: "General", information: "Botanical record" },
+    { matched_disease: "Yellow Spot", information: "Disease record", source_title: "Plant Institute", source_institution: "Botanical Research Center", source_url: "https://example.test/source" }
+  ];
+  const diseaseRecord = selectKnowledgeRecord(records, "Yellow Spot");
+  assert.equal(diseaseRecord.information, "Disease record");
+  assert.deepEqual(
+    { title: diseaseRecord.source_title, institution: diseaseRecord.source_institution, url: diseaseRecord.source_url },
+    { title: "Plant Institute", institution: "Botanical Research Center", url: "https://example.test/source" }
+  );
+  assert.equal(selectKnowledgeRecord(records, "Downy Mildew").information, "Botanical record");
+  assert.equal(selectKnowledgeRecord([{ matched_disease: "General" }], "Unknown").matched_disease, "General");
+  assert.equal(selectKnowledgeRecord([], "Unknown"), null);
 });
 
 test("accepts crop, disease, and record type filters together", () => {

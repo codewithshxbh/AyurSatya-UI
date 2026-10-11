@@ -10,7 +10,7 @@ export async function GET() {
 
   let { data, error } = await supabaseServer
     .from("knowledge_records")
-    .select("crop_name,summary,source_title")
+    .select("crop_name,summary,information,source_title,source_institution,source_url")
     .order("crop_name", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -18,12 +18,12 @@ export async function GET() {
   if (error && (error.code === "42703" || error.message?.toLowerCase().includes("column"))) {
     ({ data, error } = await supabaseServer
       .from("knowledge_records")
-      .select("crop_name,information,source_title")
+      .select("crop_name,information,source_title,source_url")
       .order("crop_name", { ascending: true })
       .limit(1)
       .maybeSingle());
     if (data) {
-      data = { ...data, summary: data.information };
+      data = { ...data, summary: data.information, source_institution: null };
     }
   }
 
@@ -36,8 +36,10 @@ export async function GET() {
     highlight: data
       ? {
           cropName: data.crop_name,
-          summary: data.summary || "Verified botanical information is available in the knowledge base.",
-          sourceTitle: data.source_title || null
+          summary: data.summary || data.information || null,
+          sourceTitle: data.source_title || null,
+          sourceInstitution: data.source_institution || null,
+          sourceUrl: data.source_url || null
         }
       : null
   });

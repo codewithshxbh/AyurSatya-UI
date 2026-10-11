@@ -35,28 +35,74 @@ export async function POST(request) {
 }
 
 async function getVisualResult(cropName, imageData) {
+  if (process.env.INFERENCE_SERVICE_URL) {
+    try {
+      const prediction = await runHostedInference(imageData);
+      return createPredictionResult(cropName, prediction);
+    } catch (error) {
+      console.error("Hosted EfficientNet-B0 inference failed", error);
+      return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable.");
+    }
+  }
   const availability = getInferenceAvailability();
   if (!availability.available) return createUnavailableModelResult(cropName, availability.reason);
   try {
     const prediction = await runEfficientNetInference(imageData);
-    const [crop, ...diseaseParts] = prediction.className.split("_");
-    if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
-      return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");
-    }
-    return {
-      disease: diseaseParts.join(" "),
-      confidence: prediction.confidence,
-      summary: `EfficientNet-B0 classified this image as ${diseaseParts.join(" ")} for ${crop}.`,
-      explanation: "The prediction and Grad-CAM overlay were generated from the configured EfficientNet-B0 checkpoint.",
-      evidence: [],
-      limitations: "This diagnostic checkpoint prediction is not a medical or agronomic confirmation and is not production-ready.",
-      model: { provider: "EfficientNet-B0", status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt" },
-      explainability: { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
-    };
+    return createPredictionResult(cropName, prediction);
   } catch (error) {
     console.error("EfficientNet-B0 inference failed", error);
     return createUnavailableModelResult(cropName, "The EfficientNet-B0 checkpoint could not produce a prediction.");
   }
+}
+
+async function runHostedInference(imageData) {
+  const match = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/=]+)$/.exec(imageData);
+  if (!match) throw new Error("The uploaded image data is invalid.");
+  const body = new FormData();
+  body.append("file", new Blob([Buffer.from(match[2], "base64")], { type: match[1] }), "upload");
+  const headers = {};
+  if (process.env.INFERENCE_SERVICE_API_KEY) headers["X-API-Key"] = process.env.INFERENCE_SERVICE_API_KEY;
+  const response = await fetch(`${process.env.INFERENCE_SERVICE_URL.replace(/\/$/, "")}/predict`, {
+    method: "POST",
+    headers,
+    body,
+    signal: AbortSignal.timeout(30000)
+  });
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("The inference service returned invalid JSON.");
+  }
+  if (!response.ok) throw new Error(payload.error || "The inference service rejected the image.");
+  if (
+    typeof payload.className !== "string" ||
+    typeof payload.confidence !== "number" ||
+    payload.confidence < 0 ||
+    payload.confidence > 1 ||
+    typeof payload.gradcamDataUrl !== "string"
+  ) {
+    throw new Error("The inference service returned an incomplete prediction.");
+  }
+  return payload;
+}
+
+function createPredictionResult(cropName, prediction) {
+  const [crop, ...diseaseParts] = prediction.className.split("_");
+  if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
+    return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");
+  }
+  const hosted = Boolean(process.env.INFERENCE_SERVICE_URL);
+  return {
+    disease: diseaseParts.join(" "),
+    confidence: prediction.confidence,
+    summary: `EfficientNet-B0 classified this image as ${diseaseParts.join(" ")} for ${crop}.`,
+    explanation: "The prediction and Grad-CAM overlay were generated from the configured EfficientNet-B0 checkpoint.",
+    evidence: [],
+    limitations: "This diagnostic checkpoint prediction is not a medical or agronomic confirmation and is not production-ready.",
+    model: { provider: "EfficientNet-B0", status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt", runtime: hosted ? "hosted" : "local" },
+    explainability: { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
+  };
 }
 
 function createUnavailableModelResult(cropName, reason = "Connect a validated EfficientNet-B0 checkpoint and compatible inference runtime to enable disease classification.") {

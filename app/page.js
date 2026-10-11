@@ -165,7 +165,7 @@ export default function Home() {
         {activeView === "analysis" &&         <Analysis selectedCrop={selectedCrop} setSelectedCrop={setSelectedCrop} file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} userId={session.user.id} cloudinaryStatus={cloudinaryStatus} setCloudinaryStatus={setCloudinaryStatus} />}
         {activeView === "history" && <HistoryView userId={session.user.id} />}
         {activeView === "knowledge" && <Knowledge />}
-        {activeView === "profile" && <Profile name={name} email={session.user.email} />}
+        {activeView === "profile" && <Profile name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
       </main>
     </div>
   );
@@ -345,6 +345,82 @@ function Knowledge() {
   return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">AYURVEDIC KNOWLEDGE BASE</p><h1>Context for every result.</h1><p className="lead">Verified crop notes from the configured Supabase knowledge records.</p></div><span className="knowledge-count"><BookOpen size={15} /> {records.length} records</span></div><div className="knowledge-intro panel"><div><strong>Read the evidence around the image.</strong><p>These references provide botanical and traditional context. They do not replace a trained disease model or field verification.</p></div></div><div className="knowledge-filters panel"><label className="field"><span>Crop</span><select value={cropFilter} onChange={(event) => setCropFilter(event.target.value)}><option value="">All crops</option>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><label className="field"><span>Disease or condition</span><input value={diseaseFilter} onChange={(event) => setDiseaseFilter(event.target.value)} placeholder="Exact record condition" /></label><label className="field"><span>Record type</span><select value={recordTypeFilter} onChange={(event) => setRecordTypeFilter(event.target.value)}><option value="">All types</option><option value="general_crop">General crop</option><option value="botanical">Botanical</option><option value="traditional_reference">Traditional reference</option><option value="disease_context">Disease context</option></select></label><label className="field"><span>Verification</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="verified">Verified only</option><option value="needs_review">Needs review</option></select></label></div>{loading ? <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div> : error ? <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div> : records.length ? <div className="knowledge-grid">{records.map((item) => <article className="knowledge-card" key={item.id}><p className="overline">{item.crop_name} · {item.record_type.replaceAll("_", " ")} <span className="badge">{item.verification_status.replaceAll("_", " ")}</span></p><h2>{item.matched_disease}</h2><p>{item.summary || item.information}</p><div className="knowledge-source"><BookOpen size={14} /><span>{item.source_title}{item.source_institution ? ` · ${item.source_institution}` : ""}{item.source_locator ? ` · ${item.source_locator}` : ""}</span></div>{item.source_url && <a className="link-button" href={item.source_url} target="_blank" rel="noreferrer">Open source reference <ArrowRight size={15} /></a>}</article>)}</div> : <div className="panel empty-state"><strong>No verified knowledge records</strong><span>Apply the database migration and seed only reviewed source records.</span></div>}</section>;
 }
 
-function Profile({ name, email }) {
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Your personal workspace details.</p></div></div><div className="panel profile-panel"><div className="profile-avatar">{name.slice(0, 2).toUpperCase()}</div><div><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p><button className="button button-secondary">Account settings <ArrowRight size={15} /></button></div></div></section>;
+function Profile({ name, email, onProfileUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [fullName, setFullName] = useState(name);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteForm, setDeleteForm] = useState({ password: "", confirmation: "" });
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your profile could not be updated.");
+      onProfileUpdated(payload.user);
+      setFullName(payload.user.full_name);
+      setEditing(false);
+      setMessage("Profile updated.");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    setPasswordMessage("");
+    setPasswordError("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("New passwords do not match.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/auth/password", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(passwordForm) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your password could not be changed.");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordOpen(false);
+      setPasswordMessage("Password changed. Other sessions were signed out.");
+    } catch (requestError) {
+      setPasswordError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteAccount(event) {
+    event.preventDefault();
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      const response = await fetch("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(deleteForm) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your account could not be deleted.");
+      window.location.reload();
+    } catch (requestError) {
+      setDeleteError(requestError.message);
+      setDeleting(false);
+    }
+  }
+
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Manage your identity and account security.</p></div></div><div className="settings-grid"><div className="panel profile-panel"><div className="profile-avatar">{name.slice(0, 2).toUpperCase()}</div><div className="profile-details"><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p>{editing ? <form className="profile-edit-form" onSubmit={saveProfile}><label className="field"><span>Display name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={80} required autoFocus /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button className="button button-secondary" type="button" onClick={() => { setEditing(false); setFullName(name); setError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setEditing(true); setMessage(""); setError(""); }}>Edit profile <ArrowRight size={15} /></button>}{message && <p className="form-success">{message}</p>}{error && <p className="form-error">{error}</p>}</div></div><div className="panel settings-card"><div className="settings-card-heading"><div><p className="overline">SECURITY</p><h2>Password</h2></div><ShieldCheck size={20} /></div><p>Change your password without exposing it to the browser or database logs.</p>{passwordOpen ? <form className="settings-form" onSubmit={changePassword}><label className="field"><span>Current password</span><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required /></label><label className="field"><span>New password</span><input type="password" minLength={8} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label><label className="field"><span>Confirm new password</span><input type="password" minLength={8} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Updating..." : "Update password"}</button><button className="button button-secondary" type="button" onClick={() => { setPasswordOpen(false); setPasswordError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setPasswordOpen(true); setPasswordMessage(""); setPasswordError(""); }}>Change password <ArrowRight size={15} /></button>}{passwordMessage && <p className="form-success">{passwordMessage}</p>}{passwordError && <p className="form-error">{passwordError}</p>}</div><div className="panel settings-card danger-card"><div className="settings-card-heading"><div><p className="overline">DANGER ZONE</p><h2>Delete account</h2></div></div><p>Remove your account, saved analyses, and active sessions permanently.</p>{deleteOpen ? <form className="settings-form" onSubmit={deleteAccount}><label className="field"><span>Current password</span><input type="password" value={deleteForm.password} onChange={(event) => setDeleteForm({ ...deleteForm, password: event.target.value })} required /></label><label className="field"><span>Type DELETE to confirm</span><input value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} required /></label><div className="profile-actions"><button className="button button-danger" disabled={deleting}>{deleting ? "Deleting..." : "Delete permanently"}</button><button className="button button-secondary" type="button" onClick={() => { setDeleteOpen(false); setDeleteError(""); }}>Cancel</button></div></form> : <button className="button button-danger-outline" onClick={() => { setDeleteOpen(true); setDeleteError(""); }}>Delete account <ArrowRight size={15} /></button>}{deleteError && <p className="form-error">{deleteError}</p>}</div></div></section>;
 }

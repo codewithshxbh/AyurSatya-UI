@@ -11,7 +11,6 @@ export async function GET() {
   let { data, error } = await supabaseServer
     .from("knowledge_records")
     .select("crop_name,summary,source_title")
-    .eq("verification_status", "verified")
     .order("crop_name", { ascending: true })
     .limit(1)
     .maybeSingle();

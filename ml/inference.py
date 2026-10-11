@@ -17,6 +17,8 @@ from torchvision import models, transforms
 
 torch.set_num_threads(max(1, int(os.environ.get("TORCH_NUM_THREADS", "1"))))
 torch.set_num_interop_threads(max(1, int(os.environ.get("TORCH_INTEROP_THREADS", "1"))))
+if os.environ.get("TORCH_MKLDNN", "1").lower() in {"0", "false", "no"}:
+    torch.backends.mkldnn.enabled = False
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)

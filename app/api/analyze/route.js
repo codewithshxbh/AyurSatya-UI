@@ -43,25 +43,25 @@ async function getVisualResult(cropName, imageData, provider = "render") {
       return createPredictionResult(cropName, prediction, provider);
     } catch (error) {
       console.error("Hosted EfficientNet-B0 inference failed", error);
-      return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable.");
+      return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable.", "service_unavailable");
     }
   }
-  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.");
+  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.", "not_configured");
   const availability = getInferenceAvailability();
-  if (!availability.available) return createUnavailableModelResult(cropName, availability.reason);
+  if (!availability.available) return createUnavailableModelResult(cropName, availability.reason, "not_configured");
   try {
     const prediction = await runEfficientNetInference(imageData);
     return createPredictionResult(cropName, prediction, "render");
   } catch (error) {
     console.error("EfficientNet-B0 inference failed", error);
-    return createUnavailableModelResult(cropName, "The EfficientNet-B0 checkpoint could not produce a prediction.");
+    return createUnavailableModelResult(cropName, "The checkpoint did not produce a usable prediction for this image.", "prediction_unavailable");
   }
 }
 
 export function createPredictionResult(cropName, prediction, provider = "render") {
   const [crop, ...diseaseParts] = prediction.className.split("_");
   if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
-    return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");
+    return createUnavailableModelResult(cropName, "The model returned no compatible prediction for the selected crop. This can happen when the checkpoint has not been trained for that crop yet.", "prediction_unavailable");
   }
   const hosted = provider === "render" || provider === "colab";
   const hasGradcam = typeof prediction.gradcamDataUrl === "string" && prediction.gradcamDataUrl.startsWith("data:image/");
@@ -79,15 +79,15 @@ export function createPredictionResult(cropName, prediction, provider = "render"
   };
 }
 
-function createUnavailableModelResult(cropName, reason = "Connect a validated EfficientNet-B0 checkpoint and compatible inference runtime to enable disease classification.") {
+function createUnavailableModelResult(cropName, reason, status = "prediction_unavailable") {
   return {
     disease: null,
     confidence: null,
-    summary: `No prediction was produced for this ${cropName} image because the validated EfficientNet-B0 model is not connected.`,
+    summary: `No compatible prediction was produced for this ${cropName} image.`,
     explanation: reason,
     evidence: [],
     limitations: "No disease, confidence, or heatmap is shown without validated model inference.",
-    model: { provider: "EfficientNet-B0", status: "not_configured", checkpoint: null },
+    model: { provider: "EfficientNet-B0", status, checkpoint: status === "not_configured" ? null : "best_efficientnet_b0.pt" },
     explainability: { status: "pending_efficientnet", message: "Grad-CAM requires the trained EfficientNet-B0 checkpoint." }
   };
 }

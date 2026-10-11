@@ -20,6 +20,22 @@ class InferenceServiceTests(unittest.TestCase):
         response = self.client.post("/predict")
         self.assertEqual(response.status_code, 401)
 
+    def test_unknown_route_returns_structured_json_error(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.get_json()["error"],
+            "The requested inference-service endpoint was not found.",
+        )
+
+    def test_unsupported_method_returns_structured_json_error(self):
+        response = self.client.get("/predict")
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(
+            response.get_json()["error"],
+            "The HTTP method is not supported for this endpoint.",
+        )
+
     @patch("app.load_checkpoint")
     def test_repeated_health_checks_never_load_model(self, load_checkpoint):
         first = self.client.get("/health")

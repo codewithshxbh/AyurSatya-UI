@@ -356,11 +356,14 @@ function HistoryView({ userId }) {
   const [items, setItems] = useState(recentAnalyses);
   const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState("30");
   useEffect(() => {
     fetch("/api/analyses").then((response) => response.json()).then(({ analyses }) => {
       if (analyses?.length) setItems(analyses.map((item) => ({
         id: item.id,
         crop: item.crop_name,
+        createdAt: item.created_at,
         date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
         status: item.result?.visual?.disease || "Analyzed",
         confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—",
@@ -370,7 +373,14 @@ function HistoryView({ userId }) {
       })));
     }).finally(() => setLoading(false));
   }, [userId]);
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div>{selectedItem ? <HistoryDetail item={selectedItem} onBack={() => setSelectedItem(null)} /> : <div className="panel history-panel"><div className="history-tools"><div className="search-box"><Search size={16} /><input placeholder="Search analyses" /></div><button className="button button-secondary">Last 30 days <ChevronDown size={15} /></button></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : items.length ? items.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />) : <div className="empty-state"><strong>No analyses yet</strong><span>Run your first crop analysis to see it here.</span></div>}</div>}</section>;
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const cutoff = dateRange === "all" ? 0 : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000;
+  const filteredItems = items.filter((item) => {
+    const matchesSearch = !normalizedQuery || `${item.crop} ${item.status}`.toLowerCase().includes(normalizedQuery);
+    const matchesDate = dateRange === "all" || new Date(item.createdAt).getTime() >= cutoff;
+    return matchesSearch && matchesDate;
+  });
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div>{selectedItem ? <HistoryDetail item={selectedItem} onBack={() => setSelectedItem(null)} /> : <div className="panel history-panel"><div className="history-tools"><label className="search-box" aria-label="Search analyses"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search by crop or result" /></label><label className="history-range"><span>Showing</span><select value={dateRange} onChange={(event) => setDateRange(event.target.value)} aria-label="Filter analyses by date"><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All time</option></select><ChevronDown size={15} /></label></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : filteredItems.length ? <div className="history-results">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />)}</div> : <div className="empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>}</div>}</section>;
 }
 
 function Knowledge() {

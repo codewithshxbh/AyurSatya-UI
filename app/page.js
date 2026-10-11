@@ -156,7 +156,7 @@ export default function Home() {
         <div className="sidebar-bottom">
           <NavButton icon={Settings} label="Profile & settings" active={activeView === "profile"} onClick={() => setActiveView("profile")} />
           <button className="nav-button" onClick={signOut}><LogOut size={17} /> Sign out</button>
-          <div className="sidebar-account"><div className="avatar">{name.slice(0, 2).toUpperCase()}</div><div><strong>{name}</strong><span>{session.user.email}</span></div></div>
+          <div className="sidebar-account"><Avatar user={session.user} name={name} size="small" /><div><strong>{name}</strong><span>{session.user.email}</span></div></div>
         </div>
       </aside>
       <main className="main">
@@ -165,7 +165,7 @@ export default function Home() {
         {activeView === "analysis" &&         <Analysis selectedCrop={selectedCrop} setSelectedCrop={setSelectedCrop} file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} userId={session.user.id} cloudinaryStatus={cloudinaryStatus} setCloudinaryStatus={setCloudinaryStatus} />}
         {activeView === "history" && <HistoryView userId={session.user.id} />}
         {activeView === "knowledge" && <Knowledge />}
-        {activeView === "profile" && <Profile name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
+        {activeView === "profile" && <Profile user={session.user} name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
       </main>
     </div>
   );
@@ -345,7 +345,13 @@ function Knowledge() {
   return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">AYURVEDIC KNOWLEDGE BASE</p><h1>Context for every result.</h1><p className="lead">Verified crop notes from the configured Supabase knowledge records.</p></div><span className="knowledge-count"><BookOpen size={15} /> {records.length} records</span></div><div className="knowledge-intro panel"><div><strong>Read the evidence around the image.</strong><p>These references provide botanical and traditional context. They do not replace a trained disease model or field verification.</p></div></div><div className="knowledge-filters panel"><label className="field"><span>Crop</span><select value={cropFilter} onChange={(event) => setCropFilter(event.target.value)}><option value="">All crops</option>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><label className="field"><span>Disease or condition</span><input value={diseaseFilter} onChange={(event) => setDiseaseFilter(event.target.value)} placeholder="Exact record condition" /></label><label className="field"><span>Record type</span><select value={recordTypeFilter} onChange={(event) => setRecordTypeFilter(event.target.value)}><option value="">All types</option><option value="general_crop">General crop</option><option value="botanical">Botanical</option><option value="traditional_reference">Traditional reference</option><option value="disease_context">Disease context</option></select></label><label className="field"><span>Verification</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="verified">Verified only</option><option value="needs_review">Needs review</option></select></label></div>{loading ? <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div> : error ? <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div> : records.length ? <div className="knowledge-grid">{records.map((item) => <article className="knowledge-card" key={item.id}><p className="overline">{item.crop_name} · {item.record_type.replaceAll("_", " ")} <span className="badge">{item.verification_status.replaceAll("_", " ")}</span></p><h2>{item.matched_disease}</h2><p>{item.summary || item.information}</p><div className="knowledge-source"><BookOpen size={14} /><span>{item.source_title}{item.source_institution ? ` · ${item.source_institution}` : ""}{item.source_locator ? ` · ${item.source_locator}` : ""}</span></div>{item.source_url && <a className="link-button" href={item.source_url} target="_blank" rel="noreferrer">Open source reference <ArrowRight size={15} /></a>}</article>)}</div> : <div className="panel empty-state"><strong>No verified knowledge records</strong><span>Apply the database migration and seed only reviewed source records.</span></div>}</section>;
 }
 
-function Profile({ name, email, onProfileUpdated }) {
+function Avatar({ user, name, size = "large" }) {
+  return user?.avatar_url
+    ? <img className={`user-avatar user-avatar-${size}`} src={user.avatar_url} alt={`${name} profile`} />
+    : <div className={`avatar-fallback avatar-fallback-${size}`}>{name.slice(0, 2).toUpperCase()}</div>;
+}
+
+function Profile({ user, name, email, onProfileUpdated }) {
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(name);
   const [saving, setSaving] = useState(false);
@@ -359,6 +365,47 @@ function Profile({ name, email, onProfileUpdated }) {
   const [deleteForm, setDeleteForm] = useState({ password: "", confirmation: "" });
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+
+  async function uploadAvatar(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setAvatarError("Choose a JPG, PNG, or WebP image up to 5 MB.");
+      return;
+    }
+    setAvatarBusy(true);
+    setAvatarError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/auth/avatar", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "The profile photo could not be uploaded.");
+      onProfileUpdated(payload.user);
+    } catch (requestError) {
+      setAvatarError(requestError.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarBusy(true);
+    setAvatarError("");
+    try {
+      const response = await fetch("/api/auth/avatar", { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "The profile photo could not be removed.");
+      onProfileUpdated(payload.user);
+    } catch (requestError) {
+      setAvatarError(requestError.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   async function saveProfile(event) {
     event.preventDefault();
@@ -422,5 +469,5 @@ function Profile({ name, email, onProfileUpdated }) {
     }
   }
 
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Manage your identity and account security.</p></div></div><div className="settings-grid"><div className="panel profile-panel"><div className="profile-avatar">{name.slice(0, 2).toUpperCase()}</div><div className="profile-details"><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p>{editing ? <form className="profile-edit-form" onSubmit={saveProfile}><label className="field"><span>Display name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={80} required autoFocus /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button className="button button-secondary" type="button" onClick={() => { setEditing(false); setFullName(name); setError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setEditing(true); setMessage(""); setError(""); }}>Edit profile <ArrowRight size={15} /></button>}{message && <p className="form-success">{message}</p>}{error && <p className="form-error">{error}</p>}</div></div><div className="panel settings-card"><div className="settings-card-heading"><div><p className="overline">SECURITY</p><h2>Password</h2></div><ShieldCheck size={20} /></div><p>Change your password without exposing it to the browser or database logs.</p>{passwordOpen ? <form className="settings-form" onSubmit={changePassword}><label className="field"><span>Current password</span><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required /></label><label className="field"><span>New password</span><input type="password" minLength={8} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label><label className="field"><span>Confirm new password</span><input type="password" minLength={8} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Updating..." : "Update password"}</button><button className="button button-secondary" type="button" onClick={() => { setPasswordOpen(false); setPasswordError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setPasswordOpen(true); setPasswordMessage(""); setPasswordError(""); }}>Change password <ArrowRight size={15} /></button>}{passwordMessage && <p className="form-success">{passwordMessage}</p>}{passwordError && <p className="form-error">{passwordError}</p>}</div><div className="panel settings-card danger-card"><div className="settings-card-heading"><div><p className="overline">DANGER ZONE</p><h2>Delete account</h2></div></div><p>Remove your account, saved analyses, and active sessions permanently.</p>{deleteOpen ? <form className="settings-form" onSubmit={deleteAccount}><label className="field"><span>Current password</span><input type="password" value={deleteForm.password} onChange={(event) => setDeleteForm({ ...deleteForm, password: event.target.value })} required /></label><label className="field"><span>Type DELETE to confirm</span><input value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} required /></label><div className="profile-actions"><button className="button button-danger" disabled={deleting}>{deleting ? "Deleting..." : "Delete permanently"}</button><button className="button button-secondary" type="button" onClick={() => { setDeleteOpen(false); setDeleteError(""); }}>Cancel</button></div></form> : <button className="button button-danger-outline" onClick={() => { setDeleteOpen(true); setDeleteError(""); }}>Delete account <ArrowRight size={15} /></button>}{deleteError && <p className="form-error">{deleteError}</p>}</div></div></section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Manage your identity and account security.</p></div></div><div className="settings-grid"><div className="panel profile-panel"><div className="profile-photo-column"><Avatar user={user} name={name} /><label className="button button-secondary avatar-upload">{avatarBusy ? "Saving..." : "Upload photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadAvatar} disabled={avatarBusy} /></label>{user.avatar_url && <button className="avatar-remove" type="button" onClick={removeAvatar} disabled={avatarBusy}>Remove photo</button>}{avatarError && <p className="form-error">{avatarError}</p>}</div><div className="profile-details"><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p>{editing ? <form className="profile-edit-form" onSubmit={saveProfile}><label className="field"><span>Display name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={80} required autoFocus /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button className="button button-secondary" type="button" onClick={() => { setEditing(false); setFullName(name); setError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setEditing(true); setMessage(""); setError(""); }}>Edit profile <ArrowRight size={15} /></button>}{message && <p className="form-success">{message}</p>}{error && <p className="form-error">{error}</p>}</div></div><div className="panel settings-card"><div className="settings-card-heading"><div><p className="overline">SECURITY</p><h2>Password</h2></div><ShieldCheck size={20} /></div><p>Change your password without exposing it to the browser or database logs.</p>{passwordOpen ? <form className="settings-form" onSubmit={changePassword}><label className="field"><span>Current password</span><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required /></label><label className="field"><span>New password</span><input type="password" minLength={8} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label><label className="field"><span>Confirm new password</span><input type="password" minLength={8} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Updating..." : "Update password"}</button><button className="button button-secondary" type="button" onClick={() => { setPasswordOpen(false); setPasswordError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setPasswordOpen(true); setPasswordMessage(""); setPasswordError(""); }}>Change password <ArrowRight size={15} /></button>}{passwordMessage && <p className="form-success">{passwordMessage}</p>}{passwordError && <p className="form-error">{passwordError}</p>}</div><div className="panel settings-card danger-card"><div className="settings-card-heading"><div><p className="overline">DANGER ZONE</p><h2>Delete account</h2></div></div><p>Remove your account, saved analyses, and active sessions permanently.</p>{deleteOpen ? <form className="settings-form" onSubmit={deleteAccount}><label className="field"><span>Current password</span><input type="password" value={deleteForm.password} onChange={(event) => setDeleteForm({ ...deleteForm, password: event.target.value })} required /></label><label className="field"><span>Type DELETE to confirm</span><input value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} required /></label><div className="profile-actions"><button className="button button-danger" disabled={deleting}>{deleting ? "Deleting..." : "Delete permanently"}</button><button className="button button-secondary" type="button" onClick={() => { setDeleteOpen(false); setDeleteError(""); }}>Cancel</button></div></form> : <button className="button button-danger-outline" onClick={() => { setDeleteOpen(true); setDeleteError(""); }}>Delete account <ArrowRight size={15} /></button>}{deleteError && <p className="form-error">{deleteError}</p>}</div></div></section>;
 }

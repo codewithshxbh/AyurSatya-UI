@@ -20,7 +20,7 @@ export async function POST(request) {
   const passwordHash = await hashPassword(password);
   const { data: existing, error: lookupError } = await supabaseServer
     .from("app_users")
-    .select("id,email,full_name,password_hash")
+    .select("id,email,full_name,password_hash,avatar_url,avatar_public_id")
     .eq("email", normalizedEmail)
     .maybeSingle();
   if (lookupError) {
@@ -37,7 +37,7 @@ export async function POST(request) {
       .update({ full_name: name, password_hash: passwordHash })
       .eq("id", existing.id)
       .is("password_hash", null)
-      .select("id,email,full_name")
+      .select("id,email,full_name,avatar_url,avatar_public_id")
       .single();
     if (claimError || !claimed) {
       console.error("Legacy account claim failed", claimError);
@@ -48,7 +48,7 @@ export async function POST(request) {
     const { data: created, error: createError } = await supabaseServer
       .from("app_users")
       .insert({ email: normalizedEmail, full_name: name, password_hash: passwordHash })
-      .select("id,email,full_name")
+      .select("id,email,full_name,avatar_url,avatar_public_id")
       .single();
     if (createError) {
       if (createError.code === "23505") return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });

@@ -23,7 +23,7 @@ export async function PATCH(request) {
     .from("app_users")
     .update({ full_name: fullName })
     .eq("id", currentUser.id)
-    .select("id,email,full_name")
+    .select("id,email,full_name,avatar_url,avatar_public_id")
     .single();
   if (error || !data) {
     console.error("Profile update failed", error);

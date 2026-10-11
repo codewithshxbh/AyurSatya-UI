@@ -7,6 +7,8 @@ CREATE TABLE public.app_users (
   full_name text NOT NULL,
   password_hash text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
+  avatar_url text,
+  avatar_public_id text,
   CONSTRAINT app_users_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.analyses (

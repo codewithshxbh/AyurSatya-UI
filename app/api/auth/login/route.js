@@ -18,7 +18,7 @@ export async function POST(request) {
   }
   const { data: user, error } = await supabaseServer
     .from("app_users")
-    .select("id,email,full_name,password_hash")
+    .select("id,email,full_name,password_hash,avatar_url,avatar_public_id")
     .eq("email", normalizedEmail)
     .maybeSingle();
   if (error || !user) {
@@ -31,5 +31,5 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
   await createSession(user);
-  return NextResponse.json({ user: { id: user.id, email: user.email, full_name: user.full_name } });
+  return NextResponse.json({ user: { id: user.id, email: user.email, full_name: user.full_name, avatar_url: user.avatar_url, avatar_public_id: user.avatar_public_id } });
 }

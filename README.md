@@ -46,6 +46,14 @@ INFERENCE_SERVICE_URL=
 INFERENCE_SERVICE_API_KEY=
 ```
 
+Profile photos use the existing server-side Cloudinary credentials. Review and
+run [`supabase_schema/005_profile_avatar.sql`](./supabase_schema/005_profile_avatar.sql)
+after the profile-avatar migration is applied. The upload route stores only the
+Cloudinary secure URL and public ID in `app_users`; replacing a photo overwrites
+the stable user asset, and removing it destroys that Cloudinary asset before
+clearing the database fields. Existing sessions pick up the saved avatar on
+their next authenticated request.
+
 Do not enable or configure Supabase Authentication for this application. Registration hashes the password with Node `scrypt`; login verifies that hash and issues an application-signed JWT in an HTTP-only, `SameSite=Strict` cookie. All database access happens in protected server routes through the service-role client, and the service-role key must never be exposed to browser code.
 
 Accounts created previously in Supabase Auth are separate from `public.app_users` passwords. They cannot be verified by this application because the Supabase Auth password hash is not available to the application. If the migration created an `app_users` profile with a `NULL` `password_hash`, registering again with that email initializes the application password on that existing profile. Accounts that already have an application password continue to reject duplicate registration.

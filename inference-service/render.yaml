@@ -4,7 +4,10 @@ services:
     runtime: python
     buildCommand: pip install -r inference-service/requirements.txt && python inference-service/download_artifacts.py
     startCommand: gunicorn --chdir inference-service --workers 1 --timeout 180 --bind 0.0.0.0:$PORT app:app
-    healthCheckPath: /ready
+    # Keep deployment health checks lightweight. Model validation remains
+    # available through /ready without preventing the web process from
+    # becoming routable while EfficientNet initializes.
+    healthCheckPath: /health
     envVars:
       - key: INFERENCE_SERVICE_API_KEY
         sync: false

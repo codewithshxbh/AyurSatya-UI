@@ -49,7 +49,7 @@ test("hosted inference rejects non-JSON upstream responses", async () => {
 
   await assert.rejects(
     () => runHostedInference(imageData),
-    { message: "The inference service returned invalid JSON." }
+    { message: "The inference service returned HTTP 502." }
   );
   globalThis.fetch = originalFetch;
 });

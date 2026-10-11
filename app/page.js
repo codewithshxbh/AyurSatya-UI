@@ -206,8 +206,32 @@ function Stat({ label, value, detail, icon: Icon }) {
   return <div className="stat"><div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div></div>;
 }
 
-function AnalysisRow({ item }) {
-  return <div className="analysis-row"><div className={`row-thumb ${item.color}`}><Leaf size={19} /></div><div><strong>{item.crop} leaf</strong><small>{item.date}</small></div><span className={`status ${item.status === "Healthy" ? "healthy" : "review"}`}>{item.status}</span><b>{item.confidence}</b><ArrowRight size={15} /></div>;
+function AnalysisRow({ item, onOpen }) {
+  return <button className="analysis-row" type="button" onClick={onOpen} aria-label={`Open ${item.crop} analysis from ${item.date}`}><div className={`row-thumb ${item.color}`}>{item.imageUrls?.[0] ? <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <Leaf size={19} />}</div><div><strong>{item.crop} leaf</strong><small>{item.date}{item.imageUrls?.length > 1 ? ` · ${item.imageUrls.length} images` : ""}</small></div><span className={`status ${item.status === "Healthy" ? "healthy" : "review"}`}>{item.status}</span><b>{item.confidence}</b><ArrowRight size={15} /></button>;
+}
+
+function HistoryDetail({ item, onBack }) {
+  const visual = item.result?.visual || {};
+  const knowledge = item.result?.knowledge || {};
+  const satellite = item.result?.satellite || {};
+  return <div className="history-detail"><div className="history-detail-actions"><button className="button button-secondary" type="button" onClick={onBack}>Back to history</button><span className="status review">Saved analysis</span></div><div className="report-grid"><div className="panel report-image"><div className="analysis-image-gallery">{item.imageUrls?.length ? item.imageUrls.map((url, index) => <img key={`${url}-${index}`} src={url} alt={`${item.crop} leaf image ${index + 1}`} onError={(event) => { event.currentTarget.closest(".analysis-image-gallery").classList.add("has-broken-image"); event.currentTarget.remove(); }} />) : <div className={`history-image-fallback ${item.color}`}><Leaf size={42} /><span>No stored image</span></div>}{item.imageUrls?.length > 0 && <div className="image-load-note">If an image does not load, its stored media link may have expired.</div>}</div><div><p className="overline">IMAGE REVIEW</p><h2>{item.crop} leaf</h2><p>{item.date}{item.imageUrls?.length > 1 ? ` · ${item.imageUrls.length} images` : ""}</p></div></div><div className="panel result-card"><p className="overline">PREDICTION</p><h2>{visual.disease || "Model not configured"}</h2><div className="confidence"><span>Confidence</span><strong>{typeof visual.confidence === "number" ? `${(visual.confidence * 100).toFixed(1)}%` : "—"}</strong></div><p>{visual.summary || "No prediction was saved for this analysis."}</p></div></div><div className="report-sections"><section className="panel report-section"><div className="section-heading"><h2>Explainability</h2></div>{visual.explainability?.heatmap ? <div className="gradcam-placeholder"><img src={visual.explainability.heatmap} alt="Saved Grad-CAM visualization" /></div> : <p>No Grad-CAM visualization was saved.</p>}</section><section className="panel report-section"><div className="section-heading"><h2>Ayurvedic knowledge</h2></div><p>{knowledge.information || "No validated knowledge record was saved."}</p>{knowledge.source && <p className="source">{knowledge.source}</p>}</section><section className="panel report-section"><div className="section-heading"><h2>Field context</h2></div><p>{satellite.summary || "No field context was saved for this analysis."}</p></section></div></div>;
+}
+
+function getAnalysisImageUrls(item) {
+  const values = [item.image_path, item.result?.imageUrls, item.result?.images, item.result?.imageUrl].flat(Infinity);
+  return [...new Set(values.flatMap((value) => {
+    if (typeof value !== "string" || !value.trim()) return [];
+    const trimmed = value.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed.filter((url) => typeof url === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    return [trimmed];
+  }))];
 }
 
 function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, userId, storageStatus, setStorageStatus }) {
@@ -234,11 +258,13 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
       uploadForm.append("file", file);
       const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadForm });
       const uploadPayload = await uploadResponse.json();
-      if (uploadResponse.ok) {
+      if (uploadResponse.ok && uploadPayload.secureUrl) {
         imageUrl = uploadPayload.secureUrl;
         setStorageStatus("Original image stored securely.");
       } else {
-        setStorageStatus(uploadPayload.error || "Image storage unavailable; continuing with the in-memory preview.");
+        setStorageStatus(uploadPayload.error || "Image storage is unavailable.");
+        setUploadMessage("The image could not be stored, so this analysis was not saved. Check media storage configuration and try again.");
+        return;
       }
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -307,13 +333,23 @@ function LoadingScreen() {
 
 function HistoryView({ userId }) {
   const [items, setItems] = useState(recentAnalyses);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     fetch("/api/analyses").then((response) => response.json()).then(({ analyses }) => {
-      if (analyses?.length) setItems(analyses.map((item) => ({ crop: item.crop_name, date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), status: item.result?.visual?.disease || "Analyzed", confidence: item.result?.visual?.confidence || "—", color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage" })));
+      if (analyses?.length) setItems(analyses.map((item) => ({
+        id: item.id,
+        crop: item.crop_name,
+        date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+        status: item.result?.visual?.disease || "Analyzed",
+        confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—",
+        color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage",
+        imageUrls: getAnalysisImageUrls(item),
+        result: item.result || {}
+      })));
     }).finally(() => setLoading(false));
   }, [userId]);
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div><div className="panel history-panel"><div className="history-tools"><div className="search-box"><Search size={16} /><input placeholder="Search analyses" /></div><button className="button button-secondary">Last 30 days <ChevronDown size={15} /></button></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : items.length ? items.map((item, index) => <AnalysisRow key={`${item.crop}-${index}`} item={item} />) : <div className="empty-state"><strong>No analyses yet</strong><span>Run your first crop analysis to see it here.</span></div>}</div></section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div>{selectedItem ? <HistoryDetail item={selectedItem} onBack={() => setSelectedItem(null)} /> : <div className="panel history-panel"><div className="history-tools"><div className="search-box"><Search size={16} /><input placeholder="Search analyses" /></div><button className="button button-secondary">Last 30 days <ChevronDown size={15} /></button></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : items.length ? items.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />) : <div className="empty-state"><strong>No analyses yet</strong><span>Run your first crop analysis to see it here.</span></div>}</div>}</section>;
 }
 
 function Knowledge() {
@@ -346,7 +382,7 @@ function Knowledge() {
   useEffect(() => {
     loadKnowledge();
   }, [loadKnowledge]);
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">AYURVEDIC KNOWLEDGE BASE</p><h1>Context for every result.</h1><p className="lead">Verified crop notes from the configured Supabase knowledge records.</p></div><span className="knowledge-count"><BookOpen size={15} /> {records.length} records</span></div><div className="knowledge-intro panel"><div><strong>Read the evidence around the image.</strong><p>These references provide botanical and traditional context. They do not replace a trained disease model or field verification.</p></div></div><div className="knowledge-filters panel"><label className="field"><span>Crop</span><select value={cropFilter} onChange={(event) => setCropFilter(event.target.value)}><option value="">All crops</option>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><label className="field"><span>Disease or condition</span><input value={diseaseFilter} onChange={(event) => setDiseaseFilter(event.target.value)} placeholder="Exact record condition" /></label><label className="field"><span>Record type</span><select value={recordTypeFilter} onChange={(event) => setRecordTypeFilter(event.target.value)}><option value="">All types</option><option value="general_crop">General crop</option><option value="botanical">Botanical</option><option value="traditional_reference">Traditional reference</option><option value="disease_context">Disease context</option></select></label><label className="field"><span>Verification</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="verified">Verified only</option><option value="needs_review">Needs review</option></select></label></div>{loading ? <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div> : error ? <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div> : records.length ? <div className="knowledge-grid">{records.map((item) => <article className="knowledge-card" key={item.id}><p className="overline">{item.crop_name} · {item.record_type.replaceAll("_", " ")} <span className="badge">{item.verification_status.replaceAll("_", " ")}</span></p><h2>{item.matched_disease}</h2><p>{item.summary || item.information}</p><div className="knowledge-source"><BookOpen size={14} /><span>{item.source_title}{item.source_institution ? ` · ${item.source_institution}` : ""}{item.source_locator ? ` · ${item.source_locator}` : ""}</span></div>{item.source_url && <a className="link-button" href={item.source_url} target="_blank" rel="noreferrer">Open source reference <ArrowRight size={15} /></a>}</article>)}</div> : <div className="panel empty-state"><strong>No verified knowledge records</strong><span>Apply the database migration and seed only reviewed source records.</span></div>}</section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">AYURVEDIC KNOWLEDGE BASE</p><h1>Context for every result.</h1><p className="lead">Curated crop notes from the configured Supabase knowledge records.</p></div><span className="knowledge-count">{records.length} records</span></div><div className="knowledge-intro panel"><div><strong>Read the evidence around the image.</strong><p>These references provide botanical and traditional context. They do not replace a trained disease model or field verification.</p></div></div><div className="knowledge-filters panel"><label className="field"><span>Crop</span><select value={cropFilter} onChange={(event) => setCropFilter(event.target.value)}><option value="">All crops</option>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><label className="field"><span>Disease or condition</span><input value={diseaseFilter} onChange={(event) => setDiseaseFilter(event.target.value)} placeholder="Exact record condition" /></label><label className="field"><span>Record type</span><select value={recordTypeFilter} onChange={(event) => setRecordTypeFilter(event.target.value)}><option value="">All types</option><option value="general_crop">General crop</option><option value="botanical">Botanical</option><option value="traditional_reference">Traditional reference</option><option value="disease_context">Disease context</option></select></label><label className="field"><span>Verification</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="verified">Curated records</option><option value="needs_review">Needs review</option></select></label></div>{loading ? <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div> : error ? <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div> : records.length ? <div className="knowledge-grid">{records.map((item) => <article className="knowledge-card" key={item.id}><p className="overline">{item.crop_name} · {item.record_type.replaceAll("_", " ")}</p><h2>{item.matched_disease}</h2><p>{item.summary || item.information}</p><div className="knowledge-source"><span>{item.source_title}{item.source_institution ? ` · ${item.source_institution}` : ""}{item.source_locator ? ` · ${item.source_locator}` : ""}</span></div>{item.source_url && <a className="link-button" href={item.source_url} target="_blank" rel="noreferrer">Open source reference <ArrowRight size={15} /></a>}</article>)}</div> : <div className="panel empty-state"><strong>No curated knowledge records</strong><span>Apply the database migration and seed reviewed source records.</span></div>}</section>;
 }
 
 function Avatar({ user, name, size = "large" }) {

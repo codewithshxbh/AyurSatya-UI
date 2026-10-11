@@ -121,6 +121,7 @@
 .review-theme .lead,.review-theme .section-title p,.review-theme .panel-heading p,.review-theme .stat span,.review-theme .stat small,.review-theme .crop-card small{color:#71837b}
 .review-theme .stat,.review-theme .panel,.review-theme .crop-card,.review-theme .history-panel{background:#fff;border-color:#dce8e1;box-shadow:0 14px 34px rgba(38,77,62,.08)}
 .review-theme .stat-icon{background:#e4f1eb;color:#287c70}.review-theme .panel-heading,.review-theme .analysis-row{border-bottom-color:#dce8e1}
+.analysis-row{width:100%;text-align:left;cursor:pointer}.analysis-row:hover{background:rgba(111,184,164,.08)}.row-thumb{overflow:hidden}.row-thumb img{width:100%;height:100%;display:block;object-fit:cover}.history-detail{display:grid;gap:18px}.history-detail-actions{display:flex;justify-content:space-between;align-items:center}.history-image-fallback{min-height:210px;border-radius:8px;display:grid;place-items:center}.history-image-fallback.forest{background:#e6efdd;color:#68906f}.history-image-fallback.mint{background:#e2f0eb;color:#438d7c}.history-image-fallback.sage{background:#e2efe2;color:#60916b}
 .review-theme .note-panel,.review-theme .process-panel{background:#edf5f0}.review-theme .note-panel h2,.review-theme .process-panel h2{color:#29443e}
 .review-theme .note-panel>p:not(.overline),.review-theme .process-panel>p,.review-theme .process-line small{color:#71837b}
 .review-theme .button-primary{background:#287c70;color:#fff;box-shadow:0 8px 17px rgba(40,124,112,.16)}.review-theme .button-primary:hover{background:#1d665c}
@@ -184,3 +185,20 @@
 @media(max-width:1000px){.knowledge-filters{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1000px){.settings-grid{grid-template-columns:1fr}}
 @media(max-width:680px){.knowledge-filters{grid-template-columns:1fr;padding:14px}.profile-panel{align-items:flex-start;padding:22px}.settings-card{padding:22px}.profile-actions .button{flex:1}}
+.button-secondary,.review-theme .button-secondary,.review-theme .history-panel .button-secondary,.review-theme .settings-card .button-secondary{background:#287c70;color:#fff;border-color:#287c70;box-shadow:0 8px 17px rgba(40,124,112,.16)}
+.button-secondary:hover,.review-theme .button-secondary:hover,.review-theme .history-panel .button-secondary:hover,.review-theme .settings-card .button-secondary:hover{background:#1d665c;color:#fff;border-color:#1d665c}
+.link-button,.review-theme .link-button,.review-theme .knowledge-card .link-button{color:#1d665c}
+.link-button:hover,.review-theme .link-button:hover,.review-theme .knowledge-card .link-button:hover{color:#14574f}
+.analysis-image-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;padding:12px;background:#f7faf8}.analysis-image-gallery img{width:100%;height:330px;object-fit:contain;background:#fff;border-radius:8px;display:block}.analysis-image-gallery:has(.history-image-fallback){grid-template-columns:1fr}.analysis-image-gallery .history-image-fallback{min-height:330px}
+.analysis-image-gallery .image-load-note{grid-column:1/-1;font-size:10px;color:#718178;padding:2px 4px}.analysis-image-gallery.has-broken-image:has(img:only-child) .image-load-note{color:#a5713e}
+.review-theme .result-card p:not(.overline),
+.review-theme .report-section>p,
+.review-theme .report-image p:not(.overline){color:#405d54}
+.review-theme .confidence{background:#deeee5;border-color:#bdd8ca}
+.review-theme .confidence span{color:#405d54}
+.review-theme .confidence strong{color:#155c50}
+.review-theme .satellite-metrics>div{background:#e1f0e8;border:1px solid #c8e0d4}
+.review-theme .satellite-metrics span{color:#405d54}
+.review-theme .satellite-metrics strong{color:#155c50}
+.review-theme .report-section .gradcam-placeholder{color:#405d54}
+.review-theme .report-section .gradcam-placeholder strong{color:#29443e}

@@ -25,7 +25,9 @@ It downloads exactly these files:
 `best_efficientnet_b0.pt`, `class_to_index.json`, and `training_config.json`.
 4. Use the included `render.yaml`, or set:
 - Start: `gunicorn --chdir inference-service --workers 1 --timeout 180 --bind 0.0.0.0:$PORT app:app`
-5. Verify `GET /ready` reports `{"status":"ready","modelReady":true}` before configuring the web app.
+5. Render uses `/health` as its deployment health check because it is lightweight and does
+   not block routing while the model initializes. Verify `GET /ready` reports
+   `{"status":"ready","modelReady":true}` before configuring the web app.
 
 The Next.js route waits up to 180 seconds for the first hosted prediction because a
 Render Free instance may sleep and the worker may need to load EfficientNet-B0 before

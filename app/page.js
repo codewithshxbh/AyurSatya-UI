@@ -12,7 +12,6 @@ import {
   Leaf,
   LogOut,
   Menu,
-  Microscope,
   PanelLeftClose,
   Plus,
   Search,
@@ -47,13 +46,17 @@ export default function Home() {
   const [uploadMessage, setUploadMessage] = useState("");
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [cloudinaryStatus, setCloudinaryStatus] = useState("");
+  const [storageStatus, setStorageStatus] = useState("");
+  const [loginHighlight, setLoginHighlight] = useState(null);
 
   useEffect(() => {
     fetch("/api/auth/me").then((response) => response.json()).then(({ user }) => {
       setSession(user ? { user } : null);
       setAuthLoading(false);
     }).catch(() => setAuthLoading(false));
+    fetch("/api/public/highlight", { cache: "no-store" }).then((response) => response.json()).then(({ highlight }) => {
+      setLoginHighlight(highlight || null);
+    }).catch(() => setLoginHighlight(null));
   }, []);
 
   async function handleAuth(event) {
@@ -113,6 +116,7 @@ export default function Home() {
               <p className="overline">MEDICINAL CROP INTELLIGENCE</p>
               <h1>Better crop health starts with a closer look.</h1>
               <p>Bring together image intelligence and plant knowledge in one focused workspace.</p>
+              {loginHighlight && <aside className="login-highlight"><p className="overline">RESEARCH HIGHLIGHT</p><strong>{loginHighlight.cropName}</strong><p>{loginHighlight.summary}</p>{loginHighlight.sourceTitle && <small>{loginHighlight.sourceTitle}</small>}</aside>}
             </div>
             <div className="leaf-line"><span /><span /><span /></div>
           </div>
@@ -162,7 +166,7 @@ export default function Home() {
       <main className="main">
         <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
         {activeView === "overview" && <Overview firstName={firstName} setActiveView={setActiveView} setSelectedCrop={setSelectedCrop} />}
-        {activeView === "analysis" &&         <Analysis selectedCrop={selectedCrop} setSelectedCrop={setSelectedCrop} file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} userId={session.user.id} cloudinaryStatus={cloudinaryStatus} setCloudinaryStatus={setCloudinaryStatus} />}
+        {activeView === "analysis" &&         <Analysis selectedCrop={selectedCrop} setSelectedCrop={setSelectedCrop} file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} userId={session.user.id} storageStatus={storageStatus} setStorageStatus={setStorageStatus} />}
         {activeView === "history" && <HistoryView userId={session.user.id} />}
         {activeView === "knowledge" && <Knowledge />}
         {activeView === "profile" && <Profile user={session.user} name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
@@ -206,7 +210,7 @@ function AnalysisRow({ item }) {
   return <div className="analysis-row"><div className={`row-thumb ${item.color}`}><Leaf size={19} /></div><div><strong>{item.crop} leaf</strong><small>{item.date}</small></div><span className={`status ${item.status === "Healthy" ? "healthy" : "review"}`}>{item.status}</span><b>{item.confidence}</b><ArrowRight size={15} /></div>;
 }
 
-function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, userId, cloudinaryStatus, setCloudinaryStatus }) {
+function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, userId, storageStatus, setStorageStatus }) {
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [satelliteContext, setSatelliteContext] = useState("none");
@@ -225,16 +229,16 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
     try {
       const imageData = await fileToDataUrl(file);
       let imageUrl = null;
-      setCloudinaryStatus("Uploading original to Cloudinary...");
+      setStorageStatus("Uploading original image...");
       const uploadForm = new FormData();
       uploadForm.append("file", file);
       const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadForm });
       const uploadPayload = await uploadResponse.json();
       if (uploadResponse.ok) {
         imageUrl = uploadPayload.secureUrl;
-        setCloudinaryStatus("Original stored securely in Cloudinary.");
+        setStorageStatus("Original image stored securely.");
       } else {
-        setCloudinaryStatus(uploadPayload.error || "Cloudinary upload unavailable; continuing with in-memory preview.");
+        setStorageStatus(uploadPayload.error || "Image storage unavailable; continuing with the in-memory preview.");
       }
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -259,7 +263,7 @@ function Analysis({ selectedCrop, setSelectedCrop, file, preview, chooseFile, up
       setAnalysisLoading(false);
     }
   }
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">NEW ANALYSIS</p><h1>{analysisResult ? "Your crop report." : "Understand your crop."}</h1><p className="lead">{analysisResult ? "A combined image, knowledge, and field-context assessment." : "Upload a clear leaf image for a structured health assessment."}</p></div></div>{analysisResult ? <AnalysisResult result={analysisResult} preview={preview} onNew={() => setAnalysisResult(null)} /> : <div className="analysis-layout"><div className="panel upload-panel"><label className="field"><span>Medicinal crop</span><select value={selectedCrop} onChange={(event) => setSelectedCrop(event.target.value)}>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}><input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} /><label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><UploadCloud size={29} /><strong>Upload leaf image</strong><span>Choose a clear image from your device</span><small>JPG or PNG, up to 10 MB</small></>}</label></div><label className="field"><span>Satellite context</span><select value={satelliteContext} onChange={(event) => setSatelliteContext(event.target.value)}><option value="none">No, analyze the leaf image only</option><option value="coordinates">Yes, provide field coordinates</option></select></label>{satelliteContext === "coordinates" && <div className="location-fields"><label className="field"><span>Field latitude <small>optional</small></span><input value={latitude} onChange={(event) => setLatitude(event.target.value)} placeholder="e.g. 28.6139" /></label><label className="field"><span>Field longitude <small>optional</small></span><input value={longitude} onChange={(event) => setLongitude(event.target.value)} placeholder="e.g. 77.2090" /></label></div>}{cloudinaryStatus && <p className="privacy">{cloudinaryStatus}</p>}{uploadMessage && <p className="form-error">{uploadMessage}</p>}<button className="button button-primary full-button" disabled={!file || analysisLoading} onClick={runAnalysis}>{analysisLoading ? "Preparing report..." : "Run analysis"} {!analysisLoading && <ArrowRight size={16} />}</button><p className="privacy"><ShieldCheck size={13} /> Disease prediction is unavailable until the validated EfficientNet-B0 model is connected.</p></div><div className="panel process-panel"><h2>One report, three sources</h2><p>The report clearly separates what came from the image, knowledge base, and satellite context.</p><div className="process-line"><div><strong>Visual assessment</strong><small>Available after validated model integration.</small></div></div><div className="process-line"><div><strong>Ayurvedic context</strong><small>Validated crop record with source metadata.</small></div></div><div className="process-line"><div><strong>Satellite context</strong><small>Sentinel-2 scene metadata and field indicators when coordinates are supplied.</small></div></div></div></div>}</section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">NEW ANALYSIS</p><h1>{analysisResult ? "Your crop report." : "Understand your crop."}</h1><p className="lead">{analysisResult ? "A combined image, knowledge, and field-context assessment." : "Upload a clear leaf image for a structured health assessment."}</p></div></div>{analysisResult ? <AnalysisResult result={analysisResult} preview={preview} onNew={() => setAnalysisResult(null)} /> : <div className="analysis-layout"><div className="panel upload-panel"><label className="field"><span>Medicinal crop</span><select value={selectedCrop} onChange={(event) => setSelectedCrop(event.target.value)}>{crops.map((crop) => <option key={crop.name}>{crop.name}</option>)}</select></label><div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}><input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} /><label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><UploadCloud size={29} /><strong>Upload leaf image</strong><span>Choose a clear image from your device</span><small>JPG or PNG, up to 10 MB</small></>}</label></div><label className="field"><span>Satellite context</span><select value={satelliteContext} onChange={(event) => setSatelliteContext(event.target.value)}><option value="none">No, analyze the leaf image only</option><option value="coordinates">Yes, provide field coordinates</option></select></label>{satelliteContext === "coordinates" && <div className="location-fields"><label className="field"><span>Field latitude <small>optional</small></span><input value={latitude} onChange={(event) => setLatitude(event.target.value)} placeholder="e.g. 28.6139" /></label><label className="field"><span>Field longitude <small>optional</small></span><input value={longitude} onChange={(event) => setLongitude(event.target.value)} placeholder="e.g. 77.2090" /></label></div>}{storageStatus && <p className="privacy">{storageStatus}</p>}{uploadMessage && <p className="form-error">{uploadMessage}</p>}<button className="button button-primary full-button" disabled={!file || analysisLoading} onClick={runAnalysis}>{analysisLoading ? "Preparing report..." : "Run analysis"} {!analysisLoading && <ArrowRight size={16} />}</button><p className="privacy">Disease prediction is unavailable until the validated EfficientNet-B0 model is connected.</p></div><div className="panel process-panel"><h2>One report, three sources</h2><p>The report clearly separates what came from the image, knowledge base, and satellite context.</p><div className="process-line"><div><strong>Visual assessment</strong><small>Available after validated model integration.</small></div></div><div className="process-line"><div><strong>Ayurvedic context</strong><small>Validated crop record with source metadata.</small></div></div><div className="process-line"><div><strong>Satellite context</strong><small>Sentinel-2 scene metadata and field indicators when coordinates are supplied.</small></div></div></div></div>}</section>;
 }
 
 async function fileToDataUrl(file) {
@@ -276,7 +280,7 @@ function AnalysisResult({ result, preview, onNew }) {
   const knowledge = result.knowledge || {};
   const satellite = result.satellite || {};
   const heatmap = visual.explainability?.heatmap;
-  return <div className="report"><div className="report-actions"><span className={`status ${visual.disease ? "healthy" : "review"}`}>{visual.disease ? "Preliminary result" : "Model not configured"}</span><button className="button button-secondary" onClick={onNew}><Plus size={15} /> New analysis</button></div><div className="report-grid"><div className="panel report-image">{preview && <img src={preview} alt="Analyzed leaf" />}<div><p className="overline">IMAGE REVIEW</p><h2>{visual.disease || "No prediction available"}</h2><p>{visual.summary || "The uploaded image has not received a model prediction."}</p></div></div><div className="panel result-card"><p className="overline">PREDICTION</p><h2>{visual.disease || "Model not configured"}</h2><div className="confidence"><span>Confidence</span><strong>{typeof visual.confidence === "number" ? `${(visual.confidence * 100).toFixed(1)}%` : "—"}</strong></div><p>{visual.limitations || "No disease or confidence is shown without real model inference."}</p></div></div><div className="report-sections"><section className="panel report-section"><div className="section-heading"><h2>Explainability</h2><span className="badge">{heatmap ? "Grad-CAM generated" : "Grad-CAM unavailable"}</span></div>{heatmap ? <div className="gradcam-placeholder"><img src={heatmap} alt="Grad-CAM visualization for the predicted class" /><span>Generated from the actual EfficientNet-B0 activation map for this prediction.</span></div> : <div className="gradcam-placeholder"><Microscope size={22} /><strong>Grad-CAM visualization not available</strong><span>No heatmap is fabricated when the inference runtime or checkpoint is unavailable.</span></div>}<p>{visual.explanation || "Connect the trained model to generate an explanation from the actual predicted class."}</p><div className="evidence-list">{(visual.evidence || []).map((item) => <div key={item}><CheckCircle2 size={15} /> {item}</div>)}</div></section><section className="panel report-section"><div className="section-heading"><h2>Ayurvedic knowledge</h2><BookOpen size={17} /></div><p>{knowledge.information || "No validated knowledge record was returned."}</p><p className="source">{knowledge.source ? `${knowledge.source}${knowledge.sourceUrl ? ` · ${knowledge.sourceUrl}` : ""}` : "No source reference available."}</p></section><section className="panel report-section"><div className="section-heading"><h2>Field context</h2><Leaf size={17} /></div><p>{satellite.summary || "Add field coordinates to retrieve the latest Sentinel-2 context."}</p><div className="satellite-metrics"><Metric label="NDVI" value={satellite.ndvi || "Unavailable"} /><Metric label="NDWI" value={satellite.ndwi || "Unavailable"} /><Metric label="Scene" value={satellite.sceneDate || "Not queried"} /></div></section></div></div>;
+  return <div className="report"><div className="report-actions"><span className={`status ${visual.disease ? "healthy" : "review"}`}>{visual.disease ? "Preliminary result" : "Model not configured"}</span><button className="button button-secondary" onClick={onNew}><Plus size={15} /> New analysis</button></div><div className="report-grid"><div className="panel report-image">{preview && <img src={preview} alt="Analyzed leaf" />}<div><p className="overline">IMAGE REVIEW</p><h2>{visual.disease || "No prediction available"}</h2><p>{visual.summary || "The uploaded image has not received a model prediction."}</p></div></div><div className="panel result-card"><p className="overline">PREDICTION</p><h2>{visual.disease || "Model not configured"}</h2><div className="confidence"><span>Confidence</span><strong>{typeof visual.confidence === "number" ? `${(visual.confidence * 100).toFixed(1)}%` : "—"}</strong></div><p>{visual.limitations || "No disease or confidence is shown without real model inference."}</p></div></div><div className="report-sections"><section className="panel report-section"><div className="section-heading"><h2>Explainability</h2><span className="badge">{heatmap ? "Grad-CAM generated" : "Grad-CAM unavailable"}</span></div>{heatmap ? <div className="gradcam-placeholder"><img src={heatmap} alt="Grad-CAM visualization for the predicted class" /><span>Generated from the actual EfficientNet-B0 activation map for this prediction.</span></div> : <div className="gradcam-placeholder"><strong>Grad-CAM visualization not available</strong><span>No heatmap is fabricated when the inference runtime or checkpoint is unavailable.</span></div>}<p>{visual.explanation || "Connect the trained model to generate an explanation from the actual predicted class."}</p><div className="evidence-list">{(visual.evidence || []).map((item) => <div key={item}><CheckCircle2 size={15} /> {item}</div>)}</div></section><section className="panel report-section"><div className="section-heading"><h2>Ayurvedic knowledge</h2><BookOpen size={17} /></div><p>{knowledge.information || "No validated knowledge record was returned."}</p><p className="source">{knowledge.source ? `${knowledge.source}${knowledge.sourceUrl ? ` · ${knowledge.sourceUrl}` : ""}` : "No source reference available."}</p></section><section className="panel report-section"><div className="section-heading"><h2>Field context</h2><Leaf size={17} /></div><p>{satellite.summary || "Add field coordinates to retrieve the latest Sentinel-2 context."}</p><div className="satellite-metrics"><Metric label="NDVI" value={satellite.ndvi || "Unavailable"} /><Metric label="NDWI" value={satellite.ndwi || "Unavailable"} /><Metric label="Scene" value={satellite.sceneDate || "Not queried"} /></div></section></div></div>;
 }
 
 function Metric({ label, value }) {

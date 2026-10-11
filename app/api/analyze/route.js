@@ -62,11 +62,15 @@ async function runHostedInference(imageData) {
   body.append("file", new Blob([Buffer.from(match[2], "base64")], { type: match[1] }), "upload");
   const headers = {};
   if (process.env.INFERENCE_SERVICE_API_KEY) headers["X-API-Key"] = process.env.INFERENCE_SERVICE_API_KEY;
+  const configuredTimeout = Number(process.env.INFERENCE_SERVICE_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.min(Math.max(configuredTimeout, 30000), 180000)
+    : 180000;
   const response = await fetch(`${process.env.INFERENCE_SERVICE_URL.replace(/\/$/, "")}/predict`, {
     method: "POST",
     headers,
     body,
-    signal: AbortSignal.timeout(30000)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   let payload;
   try {

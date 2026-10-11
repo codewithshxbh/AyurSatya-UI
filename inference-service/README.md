@@ -27,6 +27,12 @@ It downloads exactly these files:
 - Start: `gunicorn --chdir inference-service --workers 1 --timeout 180 --bind 0.0.0.0:$PORT app:app`
 5. Verify `GET /ready` reports `{"status":"ready","modelReady":true}` before configuring the web app.
 
+The Next.js route waits up to 180 seconds for the first hosted prediction because a
+Render Free instance may sleep and the worker may need to load EfficientNet-B0 before
+serving its first request. Set `INFERENCE_SERVICE_TIMEOUT_MS` in the Next.js environment
+to a value from 30,000 to 180,000 milliseconds if a different test-phase timeout is
+needed.
+
 ## Secure artifact workflow
 
 The local files under `ml/artifacts/` are ignored by Git and must remain that way.

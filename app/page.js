@@ -48,6 +48,7 @@ export default function Home() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [storageStatus, setStorageStatus] = useState("");
   const [loginHighlight, setLoginHighlight] = useState(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
   useEffect(() => {
     fetch("/api/auth/me").then((response) => response.json()).then(({ user }) => {
@@ -154,7 +155,7 @@ export default function Home() {
         <nav className="nav-list">
           <NavButton icon={BarChart3} label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
           <NavButton icon={Plus} label="New analysis" active={activeView === "analysis"} onClick={() => setActiveView("analysis")} />
-          <NavButton icon={History} label="Analysis history" active={activeView === "history"} onClick={() => setActiveView("history")} />
+          <NavButton icon={History} label="Analysis history" active={activeView === "history"} onClick={() => { setSelectedHistoryItem(null); setActiveView("history"); }} />
           <NavButton icon={BookOpen} label="Knowledge base" active={activeView === "knowledge"} onClick={() => setActiveView("knowledge")} />
         </nav>
         <div className="sidebar-bottom">
@@ -165,9 +166,9 @@ export default function Home() {
       </aside>
       <main className="main">
         <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
-        {activeView === "overview" && <Overview firstName={firstName} setActiveView={setActiveView} setSelectedCrop={setSelectedCrop} />}
+        {activeView === "overview" && <Overview firstName={firstName} setActiveView={setActiveView} setSelectedCrop={setSelectedCrop} onOpenHistoryItem={(item) => { setSelectedHistoryItem(item); setActiveView("history"); }} />}
         {activeView === "analysis" &&         <Analysis selectedCrop={selectedCrop} setSelectedCrop={setSelectedCrop} file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} userId={session.user.id} storageStatus={storageStatus} setStorageStatus={setStorageStatus} />}
-        {activeView === "history" && <HistoryView userId={session.user.id} />}
+        {activeView === "history" && <HistoryView userId={session.user.id} initialSelectedItem={selectedHistoryItem} onClearSelectedItem={() => setSelectedHistoryItem(null)} />}
         {activeView === "knowledge" && <Knowledge />}
         {activeView === "profile" && <Profile user={session.user} name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
       </main>
@@ -183,7 +184,21 @@ function NavButton({ icon: Icon, label, active, onClick }) {
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}><Icon size={17} /> {label}</button>;
 }
 
-function Overview({ firstName, setActiveView, setSelectedCrop }) {
+function toHistoryItem(item) {
+  return {
+    id: item.id,
+    crop: item.crop_name,
+    createdAt: item.created_at,
+    date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+    status: item.result?.visual?.disease || "Analyzed",
+    confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—",
+    color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage",
+    imageUrls: getAnalysisImageUrls(item),
+    result: item.result || {}
+  };
+}
+
+function Overview({ firstName, setActiveView, setSelectedCrop, onOpenHistoryItem }) {
   const [analyses, setAnalyses] = useState([]);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
   const [validatedAnalyses, setValidatedAnalyses] = useState(0);
@@ -223,7 +238,7 @@ function Overview({ firstName, setActiveView, setSelectedCrop }) {
     <div className="stats"><Stat label="Total analyses" value={historyLoading ? "—" : totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} icon={BarChart3} /><Stat label="Validated results" value={historyLoading ? "—" : validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} icon={CheckCircle2} /><Stat label="Supported crops" value={crops.length} detail="Verified from the local dataset" icon={Leaf} /></div>
     <div className="section-title"><div><h2>Start with a crop</h2><p>Select a crop to begin a new analysis.</p></div><button className="link-button" onClick={() => setActiveView("analysis")}>View all crops <ArrowRight size={15} /></button></div>
     <div className="crop-grid">{crops.map((crop) => <button key={crop.name} className="crop-card" onClick={() => { setSelectedCrop(crop.name); setActiveView("analysis"); }}><div className={`crop-image ${crop.color}`}><Leaf size={42} strokeWidth={1.2} /></div><span><strong>{crop.name}</strong><small>{crop.scientific}</small></span><ArrowRight size={16} /></button>)}</div>
-    <div className="content-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent analyses</h2><p>Your saved crop intelligence reports.</p></div><button className="link-button" onClick={() => setActiveView("history")}>See history <ArrowRight size={15} /></button></div>{historyLoading ? <div className="empty-state"><span>Loading your saved analyses...</span></div> : historyError ? <div className="empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div> : analyses.length ? <div className="overview-recent-list">{analyses.slice(0, 3).map((item, index) => <AnalysisRow key={item.id || `${item.crop_name}-${index}`} item={{ id: item.id, crop: item.crop_name, createdAt: item.created_at, date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), status: item.result?.visual?.disease || "Analyzed", confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—", color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage", imageUrls: getAnalysisImageUrls(item), result: item.result || {} }} onOpen={() => setActiveView("history")} />)}</div> : <div className="empty-state"><History size={20} /><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>}</div><div className="panel note-panel"><p className="overline">FIELD NOTE</p><h2>Good images create better answers.</h2><p>Use natural light, a plain background, and show the whole leaf whenever possible.</p><button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image <ArrowRight size={15} /></button></div></div>
+    <div className="content-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent analyses</h2><p>Your saved crop intelligence reports.</p></div><button className="link-button" onClick={() => setActiveView("history")}>See history <ArrowRight size={15} /></button></div>{historyLoading ? <div className="empty-state"><span>Loading your saved analyses...</span></div> : historyError ? <div className="empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div> : analyses.length ? <div className="overview-recent-list">{analyses.slice(0, 3).map((item, index) => { const historyItem = toHistoryItem(item); return <AnalysisRow key={historyItem.id || `${historyItem.crop}-${index}`} item={historyItem} onOpen={() => onOpenHistoryItem(historyItem)} />; })}</div> : <div className="empty-state"><History size={20} /><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>}</div><div className="panel note-panel"><p className="overline">FIELD NOTE</p><h2>Good images create better answers.</h2><p>Use natural light, a plain background, and show the whole leaf whenever possible.</p><button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image <ArrowRight size={15} /></button></div></div>
   </section>;
 }
 
@@ -380,25 +395,18 @@ function LoadingScreen() {
   </div>;
 }
 
-function HistoryView({ userId }) {
+function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
   const [items, setItems] = useState(recentAnalyses);
-  const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(initialSelectedItem);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState("30");
   useEffect(() => {
+    setSelectedItem(initialSelectedItem);
+  }, [initialSelectedItem]);
+  useEffect(() => {
     fetch("/api/analyses").then((response) => response.json()).then(({ analyses }) => {
-      if (analyses?.length) setItems(analyses.map((item) => ({
-        id: item.id,
-        crop: item.crop_name,
-        createdAt: item.created_at,
-        date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-        status: item.result?.visual?.disease || "Analyzed",
-        confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—",
-        color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage",
-        imageUrls: getAnalysisImageUrls(item),
-        result: item.result || {}
-      })));
+      if (analyses?.length) setItems(analyses.map(toHistoryItem));
     }).finally(() => setLoading(false));
   }, [userId]);
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -408,7 +416,7 @@ function HistoryView({ userId }) {
     const matchesDate = dateRange === "all" || new Date(item.createdAt).getTime() >= cutoff;
     return matchesSearch && matchesDate;
   });
-  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div>{selectedItem ? <HistoryDetail item={selectedItem} onBack={() => setSelectedItem(null)} /> : <div className="panel history-panel"><div className="history-tools"><label className="search-box" aria-label="Search analyses"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search by crop or result" /></label><label className="history-range"><span>Showing</span><span className="history-range-value">{dateRange === "all" ? "All time" : `Last ${dateRange} days`}</span><select value={dateRange} onChange={(event) => setDateRange(event.target.value)} aria-label="Filter analyses by date"><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All time</option></select><ChevronDown size={15} /></label></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : filteredItems.length ? <div className="history-results">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />)}</div> : <div className="empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>}</div>}</section>;
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">YOUR WORKSPACE</p><h1>Analysis history.</h1><p className="lead">Review previous results and keep your research connected.</p></div></div>{selectedItem ? <HistoryDetail item={selectedItem} onBack={() => { setSelectedItem(null); onClearSelectedItem(); }} /> : <div className="panel history-panel"><div className="history-tools"><label className="search-box" aria-label="Search analyses"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search by crop or result" /></label><label className="history-range"><span>Showing</span><span className="history-range-value">{dateRange === "all" ? "All time" : `Last ${dateRange} days`}</span><select value={dateRange} onChange={(event) => setDateRange(event.target.value)} aria-label="Filter analyses by date"><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All time</option></select><ChevronDown size={15} /></label></div>{loading ? <div className="skeleton-list"><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /><div className="skeleton skeleton-row" /></div> : filteredItems.length ? <div className="history-results">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />)}</div> : <div className="empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>}</div>}</section>;
 }
 
 function Knowledge() {

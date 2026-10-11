@@ -21,3 +21,5 @@ services:
         value: "1"
       - key: TORCH_INTEROP_THREADS
         value: "1"
+      - key: ENABLE_GRADCAM
+        value: "0"

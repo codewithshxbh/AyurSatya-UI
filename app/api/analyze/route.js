@@ -62,6 +62,7 @@ export function createPredictionResult(cropName, prediction) {
     return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");
   }
   const hosted = Boolean(process.env.INFERENCE_SERVICE_URL);
+  const hasGradcam = typeof prediction.gradcamDataUrl === "string" && prediction.gradcamDataUrl.startsWith("data:image/");
   return {
     disease: diseaseParts.join(" "),
     confidence: prediction.confidence,
@@ -70,7 +71,9 @@ export function createPredictionResult(cropName, prediction) {
     evidence: [],
     limitations: "This diagnostic checkpoint prediction is not a medical or agronomic confirmation and is not production-ready.",
     model: { provider: "EfficientNet-B0", status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt", runtime: hosted ? "hosted" : "local" },
-    explainability: { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
+    explainability: hasGradcam
+      ? { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
+      : { status: "unavailable", message: "The hosted prediction completed, but Grad-CAM is disabled for the constrained inference runtime." }
   };
 }
 

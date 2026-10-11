@@ -104,6 +104,16 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])
     tensor = preprocess(image).unsqueeze(0)
+    if os.environ.get("ENABLE_GRADCAM", "1").lower() not in {"1", "true", "yes"}:
+        with torch.inference_mode():
+            probabilities = torch.softmax(model(tensor), dim=1)
+        class_index = int(probabilities.argmax(dim=1).item())
+        return {
+            "className": labels[class_index],
+            "confidence": float(probabilities[0, class_index].item()),
+            "gradcamDataUrl": "",
+        }
+
     activations: torch.Tensor | None = None
 
     def save_activations(_module: nn.Module, _inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:

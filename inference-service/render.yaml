@@ -24,6 +24,6 @@ services:
       - key: TORCH_INTEROP_THREADS
         value: "1"
       - key: TORCH_DTYPE
-        value: "float16"
+        value: "float32"
       - key: ENABLE_GRADCAM
         value: "0"

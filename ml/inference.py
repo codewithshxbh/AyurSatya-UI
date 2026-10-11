@@ -17,6 +17,7 @@ from torchvision import models, transforms
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 DEFAULT_ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
+MAX_INFERENCE_IMAGE_SIZE = (2048, 2048)
 _MODEL_CACHE_KEY: str | None = None
 _MODEL_CACHE_VALUE: tuple[nn.Module, list[str], int] | None = None
 _MODEL_CACHE_LOCK = threading.Lock()
@@ -84,6 +85,7 @@ def decode_image(image_data: str) -> Image.Image:
         _, encoded = image_data.split(",", 1)
         image = Image.open(io.BytesIO(base64.b64decode(encoded, validate=True))).convert("RGB")
         image.load()
+        image.thumbnail(MAX_INFERENCE_IMAGE_SIZE, Image.Resampling.LANCZOS)
         return image
     except (ValueError, OSError, UnidentifiedImageError) as error:
         raise ValueError("The uploaded image could not be decoded.") from error

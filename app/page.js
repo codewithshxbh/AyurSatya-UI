@@ -23,9 +23,9 @@ import {
 } from "lucide-react";
 
 const crops = [
-  { name: "Neem", scientific: "Azadirachta indica", color: "forest" },
-  { name: "Tulsi", scientific: "Ocimum tenuiflorum", color: "mint" },
-  { name: "Kalanchoe", scientific: "Kalanchoe pinnata", color: "sage" }
+  { name: "Neem", scientific: "Azadirachta indica", color: "forest", image: "/crops/neem.jpg" },
+  { name: "Tulsi", scientific: "Ocimum tenuiflorum", color: "mint", image: "/crops/tulsi.jpg" },
+  { name: "Kalanchoe", scientific: "Kalanchoe pinnata", color: "sage", image: "/crops/kalanchoe.jpg" }
 ];
 
 const recentAnalyses = [];
@@ -237,7 +237,7 @@ function Overview({ firstName, setActiveView, setSelectedCrop, onOpenHistoryItem
     <div className="page-heading"><div><p className="overline">{dateLabel}</p><h1>{greeting}, {firstName}.</h1><p className="lead">A clear view of the work happening in your crop workspace.</p></div><button className="button button-primary" onClick={() => setActiveView("analysis")}><Plus size={17} /> New analysis</button></div>
     <div className="stats"><Stat label="Total analyses" value={historyLoading ? "—" : totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} icon={BarChart3} /><Stat label="Validated results" value={historyLoading ? "—" : validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} icon={CheckCircle2} /><Stat label="Supported crops" value={crops.length} detail="Verified from the local dataset" icon={Leaf} /></div>
     <div className="section-title"><div><h2>Start with a crop</h2><p>Select a crop to begin a new analysis.</p></div><button className="link-button" onClick={() => setActiveView("analysis")}>View all crops <ArrowRight size={15} /></button></div>
-    <div className="crop-grid">{crops.map((crop) => <button key={crop.name} className="crop-card" onClick={() => { setSelectedCrop(crop.name); setActiveView("analysis"); }}><div className={`crop-image ${crop.color}`}><Leaf size={42} strokeWidth={1.2} /></div><span><strong>{crop.name}</strong><small>{crop.scientific}</small></span><ArrowRight size={16} /></button>)}</div>
+    <div className="crop-grid">{crops.map((crop) => <button key={crop.name} className="crop-card" onClick={() => { setSelectedCrop(crop.name); setActiveView("analysis"); }}><div className={`crop-image ${crop.color}`}><img src={crop.image} alt={`${crop.name} leaf`} loading="eager" decoding="async" fetchPriority="high" /></div><span><strong>{crop.name}</strong><small>{crop.scientific}</small></span><ArrowRight size={16} /></button>)}</div>
     <div className="content-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent analyses</h2><p>Your saved crop intelligence reports.</p></div><button className="link-button" onClick={() => setActiveView("history")}>See history <ArrowRight size={15} /></button></div>{historyLoading ? <div className="empty-state"><span>Loading your saved analyses...</span></div> : historyError ? <div className="empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div> : analyses.length ? <div className="overview-recent-list">{analyses.slice(0, 3).map((item, index) => { const historyItem = toHistoryItem(item); return <AnalysisRow key={historyItem.id || `${historyItem.crop}-${index}`} item={historyItem} onOpen={() => onOpenHistoryItem(historyItem)} />; })}</div> : <div className="empty-state"><History size={20} /><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>}</div><div className="panel note-panel"><p className="overline">FIELD NOTE</p><h2>Good images create better answers.</h2><p>Use natural light, a plain background, and show the whole leaf whenever possible.</p><button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image <ArrowRight size={15} /></button></div></div>
   </section>;
 }

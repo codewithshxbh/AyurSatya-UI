@@ -20,13 +20,10 @@ class InferenceServiceTests(unittest.TestCase):
         response = self.client.post("/predict")
         self.assertEqual(response.status_code, 401)
 
-    def test_unknown_route_returns_structured_json_error(self):
+    def test_root_returns_liveness_json_for_legacy_health_checks(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(
-            response.get_json()["error"],
-            "The requested inference-service endpoint was not found.",
-        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "ok")
 
     def test_unsupported_method_returns_structured_json_error(self):
         response = self.client.get("/predict")

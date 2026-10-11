@@ -84,6 +84,12 @@ def health():
     })
 
 
+@app.get("/")
+def root():
+    """Compatibility liveness check for providers configured to probe the root path."""
+    return health()
+
+
 @app.get("/ready")
 def ready():
     """Readiness check; initializes the model once and reports compatibility."""

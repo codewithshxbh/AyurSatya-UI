@@ -31,6 +31,12 @@
 .review-theme .badge{background:#e3f1e9;color:#286b5d}
 .review-theme .evidence-list div{color:#526860}
 .review-theme .source{color:#52766a!important}
+.knowledge-label{font-size:10px!important;text-transform:uppercase;letter-spacing:1.2px;font-weight:700;color:#287c70!important;margin:20px 0 8px!important}
+.knowledge-source-box{display:flex;flex-direction:column;gap:7px;margin-top:22px;padding:13px 14px;background:#f1f8f4;border:1px solid #d4e9df;border-radius:9px}
+.knowledge-source-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:700;color:#719087}
+.knowledge-source-box strong{font-size:11px;line-height:1.45;color:#29443e}
+.knowledge-source-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;width:fit-content;margin-top:4px;padding:8px 11px;border-radius:7px;background:#287c70;color:#fff;font-size:10px;font-weight:700;text-decoration:none;transition:.2s}
+.knowledge-source-link:hover{background:#1d665c;transform:translateY(-1px)}
 .review-theme .satellite-metrics div{background:#edf5f0}
 .review-theme .satellite-metrics strong{color:#29443e}
 .review-theme .process-panel>p,.review-theme .process-line small{color:#526860}

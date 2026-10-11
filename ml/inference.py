@@ -105,29 +105,23 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
     ])
     tensor = preprocess(image).unsqueeze(0)
     activations: torch.Tensor | None = None
-    gradients: torch.Tensor | None = None
 
     def save_activations(_module: nn.Module, _inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
         nonlocal activations
         activations = output
 
-    def save_gradients(_module: nn.Module, _grad_input: tuple[torch.Tensor, ...], grad_output: tuple[torch.Tensor, ...]) -> None:
-        nonlocal gradients
-        gradients = grad_output[0]
-
     with _INFERENCE_LOCK:
         target_layer = model.features[-1]
         activation_hook = target_layer.register_forward_hook(save_activations)
-        gradient_hook = target_layer.register_full_backward_hook(save_gradients)
         try:
             model.zero_grad(set_to_none=True)
             logits = model(tensor)
             probabilities = torch.softmax(logits, dim=1)
             class_index = int(probabilities.argmax(dim=1).item())
             score = logits[0, class_index]
-            score.backward()
-            if activations is None or gradients is None:
+            if activations is None:
                 raise RuntimeError("Grad-CAM activations were not captured.")
+            gradients = torch.autograd.grad(score, activations, retain_graph=False)[0]
             weights = gradients.mean(dim=(2, 3), keepdim=True)
             cam = torch.relu((weights * activations).sum(dim=1, keepdim=True))
             cam = torch.nn.functional.interpolate(cam, size=image.size[::-1], mode="bilinear", align_corners=False)
@@ -149,7 +143,6 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
             }
         finally:
             activation_hook.remove()
-            gradient_hook.remove()
 
 
 def main() -> None:

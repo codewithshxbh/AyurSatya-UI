@@ -112,8 +112,8 @@ export default function Home() {
         <div className="auth-visual">
           <div className="auth-visual-inner">
             <span className="wordmark">Ayur<span>Satya</span></span>
+            <p className="overline auth-visual-overline">MEDICINAL CROP INTELLIGENCE</p>
             <div className="auth-visual-copy">
-              <p className="overline">MEDICINAL CROP INTELLIGENCE</p>
               <h1>Better crop health starts with a closer look.</h1>
               <p>Bring together image intelligence and plant knowledge in one focused workspace.</p>
               {loginHighlight && <aside className="login-highlight"><p className="overline">RESEARCH HIGHLIGHT</p><strong>{loginHighlight.cropName}</strong><p>{loginHighlight.summary}</p>{loginHighlight.sourceTitle && <small>{loginHighlight.sourceTitle}</small>}</aside>}

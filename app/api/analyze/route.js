@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth-server";
+import { runHostedInference } from "../../../lib/hosted-inference";
 import { getInferenceAvailability, runEfficientNetInference } from "../../../lib/model-inference";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
 
@@ -55,43 +56,7 @@ async function getVisualResult(cropName, imageData) {
   }
 }
 
-async function runHostedInference(imageData) {
-  const match = /^data:(image\/(?:jpeg|png));base64,([A-Za-z0-9+/=]+)$/.exec(imageData);
-  if (!match) throw new Error("The uploaded image data is invalid.");
-  const body = new FormData();
-  body.append("file", new Blob([Buffer.from(match[2], "base64")], { type: match[1] }), "upload");
-  const headers = {};
-  if (process.env.INFERENCE_SERVICE_API_KEY) headers["X-API-Key"] = process.env.INFERENCE_SERVICE_API_KEY;
-  const configuredTimeout = Number(process.env.INFERENCE_SERVICE_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(configuredTimeout)
-    ? Math.min(Math.max(configuredTimeout, 30000), 180000)
-    : 180000;
-  const response = await fetch(`${process.env.INFERENCE_SERVICE_URL.replace(/\/$/, "")}/predict`, {
-    method: "POST",
-    headers,
-    body,
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error("The inference service returned invalid JSON.");
-  }
-  if (!response.ok) throw new Error(payload.error || "The inference service rejected the image.");
-  if (
-    typeof payload.className !== "string" ||
-    typeof payload.confidence !== "number" ||
-    payload.confidence < 0 ||
-    payload.confidence > 1 ||
-    typeof payload.gradcamDataUrl !== "string"
-  ) {
-    throw new Error("The inference service returned an incomplete prediction.");
-  }
-  return payload;
-}
-
-function createPredictionResult(cropName, prediction) {
+export function createPredictionResult(cropName, prediction) {
   const [crop, ...diseaseParts] = prediction.className.split("_");
   if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
     return createUnavailableModelResult(cropName, "The model returned an unsupported class for the selected crop.");

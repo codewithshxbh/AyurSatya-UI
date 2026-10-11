@@ -140,5 +140,26 @@ def request_too_large(_error):
     return _error("Images up to 10 MB are accepted.", 413)
 
 
+@app.errorhandler(400)
+def bad_request(_error):
+    return _error("The request could not be understood.", 400)
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    return _error("The requested inference-service endpoint was not found.", 404)
+
+
+@app.errorhandler(405)
+def method_not_allowed(_error):
+    return _error("The HTTP method is not supported for this endpoint.", 405)
+
+
+@app.errorhandler(500)
+def internal_server_error(_error):
+    app.logger.exception("Unhandled inference-service request error")
+    return _error("The inference service encountered an internal error.", 500)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

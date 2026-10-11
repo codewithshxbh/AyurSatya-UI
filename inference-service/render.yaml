@@ -26,6 +26,6 @@ services:
       - key: TORCH_MKLDNN
         value: "0"
       - key: TORCH_DTYPE
-        value: "bfloat16"
+        value: "float16"
       - key: ENABLE_GRADCAM
         value: "0"

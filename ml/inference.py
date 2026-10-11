@@ -36,8 +36,13 @@ def build_model(class_count: int) -> nn.Module:
     return model
 
 
-def _use_half_precision() -> bool:
-    return os.environ.get("TORCH_DTYPE", "float32").lower() in {"float16", "half"}
+def _inference_dtype() -> torch.dtype | None:
+    configured = os.environ.get("TORCH_DTYPE", "float32").lower()
+    if configured in {"float16", "half"}:
+        return torch.float16
+    if configured in {"bfloat16", "bf16"}:
+        return torch.bfloat16
+    return None
 
 
 def _load_checkpoint_uncached(artifacts_dir: Path) -> tuple[nn.Module, list[str], int]:
@@ -68,8 +73,9 @@ def _load_checkpoint_uncached(artifacts_dir: Path) -> tuple[nn.Module, list[str]
     model = build_model(len(labels))
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
-    if _use_half_precision():
-        model.half()
+    dtype = _inference_dtype()
+    if dtype is not None:
+        model.to(dtype=dtype)
     return model, labels, image_size
 
 
@@ -112,8 +118,9 @@ def run_inference(image_data: str, artifacts_dir: Path = DEFAULT_ARTIFACTS) -> d
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])
     tensor = preprocess(image).unsqueeze(0)
-    if _use_half_precision():
-        tensor = tensor.half()
+    dtype = _inference_dtype()
+    if dtype is not None:
+        tensor = tensor.to(dtype=dtype)
     if os.environ.get("ENABLE_GRADCAM", "1").lower() not in {"1", "true", "yes"}:
         with torch.inference_mode():
             probabilities = torch.softmax(model(tensor), dim=1)

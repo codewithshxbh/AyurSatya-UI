@@ -4,6 +4,7 @@ import { isInferenceProvider, runInferenceProvider } from "../../../lib/inferenc
 import { getInferenceAvailability, runEfficientNetInference } from "../../../lib/model-inference";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
 import { normalizeKnowledgeCrop, selectKnowledgeRecord } from "../../../lib/knowledge-filters.mjs";
+import { createPredictionResult, createUnavailableModelResult } from "../../../lib/prediction-result";
 
 export async function POST(request) {
   try {
@@ -44,53 +45,19 @@ async function getVisualResult(cropName, imageData, provider = "render") {
       return createPredictionResult(cropName, prediction, provider);
     } catch (error) {
       console.error("Hosted EfficientNet-B0 inference failed", error);
-      return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable.", "service_unavailable");
+      return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable. Check the server logs for the underlying error.", "service_unavailable", provider);
     }
   }
-  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.", "not_configured");
+  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.", "not_configured", provider);
   const availability = getInferenceAvailability();
-  if (!availability.available) return createUnavailableModelResult(cropName, availability.reason, "not_configured");
+  if (!availability.available) return createUnavailableModelResult(cropName, availability.reason, "not_configured", provider);
   try {
     const prediction = await runEfficientNetInference(imageData);
     return createPredictionResult(cropName, prediction, "render");
   } catch (error) {
     console.error("EfficientNet-B0 inference failed", error);
-    return createUnavailableModelResult(cropName, "The checkpoint did not produce a usable prediction for this image.", "prediction_unavailable");
+    return createUnavailableModelResult(cropName, "The checkpoint did not produce a usable prediction for this image. Check the server logs for the underlying error.", "prediction_unavailable", provider);
   }
-}
-
-export function createPredictionResult(cropName, prediction, provider = "render") {
-  const [crop, ...diseaseParts] = prediction.className.split("_");
-  if (!crop || crop.toLowerCase() !== cropName.toLowerCase() || !diseaseParts.length) {
-    return createUnavailableModelResult(cropName, "The model returned no compatible prediction for the selected crop. This can happen when the checkpoint has not been trained for that crop yet.", "prediction_unavailable");
-  }
-  const hosted = provider === "render" || provider === "colab";
-  const hasGradcam = typeof prediction.gradcamDataUrl === "string" && prediction.gradcamDataUrl.startsWith("data:image/");
-  return {
-    disease: diseaseParts.join(" "),
-    confidence: prediction.confidence,
-    summary: `EfficientNet-B0 classified this image as ${diseaseParts.join(" ")} for ${crop}.`,
-    explanation: "The prediction and Grad-CAM overlay were generated from the configured EfficientNet-B0 checkpoint.",
-    evidence: [],
-    limitations: "This diagnostic checkpoint prediction is not a medical or agronomic confirmation and is not production-ready.",
-    model: { provider: "EfficientNet-B0", inferenceProvider: provider, status: "diagnostic_checkpoint", checkpoint: "best_efficientnet_b0.pt", runtime: hosted ? "hosted" : "local" },
-    explainability: hasGradcam
-      ? { status: "available", message: "Grad-CAM generated from the final EfficientNet-B0 feature layer.", heatmap: prediction.gradcamDataUrl }
-      : { status: "unavailable", message: "The hosted prediction completed, but Grad-CAM is disabled for the constrained inference runtime." }
-  };
-}
-
-function createUnavailableModelResult(cropName, reason, status = "prediction_unavailable") {
-  return {
-    disease: null,
-    confidence: null,
-    summary: `No compatible prediction was produced for this ${cropName} image.`,
-    explanation: reason,
-    evidence: [],
-    limitations: "No disease, confidence, or heatmap is shown without validated model inference.",
-    model: { provider: "EfficientNet-B0", status, checkpoint: status === "not_configured" ? null : "best_efficientnet_b0.pt" },
-    explainability: { status: "pending_efficientnet", message: "Grad-CAM requires the trained EfficientNet-B0 checkpoint." }
-  };
 }
 
 async function getKnowledgeRecord(cropName, disease) {

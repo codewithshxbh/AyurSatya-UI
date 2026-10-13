@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 const imageData = "data:image/png;base64,aW1hZ2U=";
 const originalFetch = globalThis.fetch;
+const { createPredictionResult } = await import("../lib/prediction-result.js");
 
 function mockResponse({ status = 200, body, contentType = "application/json" }) {
   return {
@@ -12,6 +13,40 @@ function mockResponse({ status = 200, body, contentType = "application/json" }) 
     text: async () => body
   };
 }
+
+test("prediction results accept valid labels for every supported crop", () => {
+  for (const [cropName, className] of [
+    ["Neem ", "Neem_Healthy"],
+    ["Kalanchoe", "Kalanchoe_Web_Blight"],
+    ["Tulsi", "Tulsi_Yellow_Spot"],
+  ]) {
+    const result = createPredictionResult(cropName, { className, confidence: 0.91 }, "colab");
+    assert.equal(result.disease, className.split("_").slice(1).join(" "));
+    assert.equal(result.confidence, 0.91);
+    assert.equal(result.model.inferenceProvider, "colab");
+  }
+});
+
+test("prediction results reject wrong crops, malformed labels, and invalid confidence", () => {
+  const invalidPredictions = [
+    { className: "Tulsi_Healthy", confidence: 0.91 },
+    { className: "", confidence: 0.91 },
+    { className: "Neem_Unknown", confidence: 0.91 },
+    { className: "Neem_Healthy" },
+    { className: "Neem_Healthy", confidence: "0.91" },
+    { className: "Neem_Healthy", confidence: Number.NaN },
+    { className: "Neem_Healthy", confidence: Number.POSITIVE_INFINITY },
+    { className: "Neem_Healthy", confidence: -0.01 },
+    { className: "Neem_Healthy", confidence: 1.01 },
+  ];
+
+  for (const prediction of invalidPredictions) {
+    const result = createPredictionResult("Neem", prediction, "render");
+    assert.equal(result.disease, null);
+    assert.equal(result.model.status, "prediction_unavailable");
+    assert.equal(result.model.inferenceProvider, "render");
+  }
+});
 
 test("hosted inference parses valid JSON and sends the expected multipart request", async () => {
   let request;

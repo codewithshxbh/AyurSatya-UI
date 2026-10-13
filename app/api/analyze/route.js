@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth-server";
-import { isInferenceProvider, runInferenceProvider } from "../../../lib/inference-providers";
+import { getProviderConfig, isInferenceProvider, runInferenceProvider } from "../../../lib/inference-providers";
 import { getInferenceAvailability, runEfficientNetInference } from "../../../lib/model-inference";
 import { supabaseServer, supabaseServerConfigured } from "../../../lib/supabase";
 import { normalizeKnowledgeCrop, selectKnowledgeRecord } from "../../../lib/knowledge-filters.mjs";
@@ -39,23 +39,38 @@ export async function POST(request) {
 }
 
 async function getVisualResult(cropName, imageData, provider = "render") {
-  if ((provider === "render" && process.env.INFERENCE_SERVICE_URL) || (provider === "colab" && process.env.COLAB_INFERENCE_URL)) {
+  const providerConfig = getProviderConfig(provider);
+  console.info("EfficientNet provider configuration", {
+    provider,
+    configuredUrl: Boolean(providerConfig?.url),
+    configuredApiKey: Boolean(providerConfig?.apiKey),
+  });
+  if (providerConfig?.url) {
     try {
       const prediction = await runInferenceProvider(provider, imageData);
       return createPredictionResult(cropName, prediction, provider);
     } catch (error) {
-      console.error("Hosted EfficientNet-B0 inference failed", error);
+      console.error("Hosted EfficientNet-B0 inference failed", {
+        provider,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return createUnavailableModelResult(cropName, "The hosted EfficientNet-B0 inference service is unavailable. Check the server logs for the underlying error.", "service_unavailable", provider);
     }
   }
-  if (provider === "colab") return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.", "not_configured", provider);
+  if (provider === "colab") {
+    console.warn("EfficientNet provider is not configured", { provider });
+    return createUnavailableModelResult(cropName, "Google Colab is not configured or its temporary runtime is offline.", "not_configured", provider);
+  }
   const availability = getInferenceAvailability();
   if (!availability.available) return createUnavailableModelResult(cropName, availability.reason, "not_configured", provider);
   try {
     const prediction = await runEfficientNetInference(imageData);
     return createPredictionResult(cropName, prediction, "render");
   } catch (error) {
-    console.error("EfficientNet-B0 inference failed", error);
+    console.error("EfficientNet-B0 inference failed", {
+      provider,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return createUnavailableModelResult(cropName, "The checkpoint did not produce a usable prediction for this image. Check the server logs for the underlying error.", "prediction_unavailable", provider);
   }
 }

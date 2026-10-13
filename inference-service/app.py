@@ -126,6 +126,11 @@ def predict():
         return _error("EfficientNet-B0 artifacts are unavailable.", 503)
     try:
         result = run_inference(image_data, artifacts_dir)
+        app.logger.info(
+            "EfficientNet prediction produced class=%s confidence=%s",
+            result.get("className"),
+            result.get("confidence"),
+        )
         return jsonify({
             "className": result["className"],
             "confidence": result["confidence"],

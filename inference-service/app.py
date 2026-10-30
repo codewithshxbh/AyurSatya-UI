@@ -54,6 +54,16 @@ def _error(message: str, status: int):
     return jsonify({"error": message}), status
 
 
+def _is_invalid_image_error(message: str) -> bool:
+    normalized = message.lower()
+    return (
+        "could not be decoded" in normalized
+        or "image data must be" in normalized
+        or "dimensions are too large" in normalized
+        or "image file is required" in normalized
+    )
+
+
 def _decode_upload(file_storage):
     if not file_storage or not file_storage.filename:
         return None, "An image file is required."
@@ -137,7 +147,14 @@ def predict():
             "gradcamDataUrl": result["gradcamDataUrl"],
             "model": "EfficientNet-B0",
         })
-    except (FileNotFoundError, KeyError, ValueError):
+    except ValueError as error:
+        message = str(error)
+        if _is_invalid_image_error(message):
+            app.logger.exception("Uploaded image could not be decoded for inference")
+            return _error("The uploaded image could not be decoded.", 400)
+        app.logger.exception("EfficientNet-B0 artifacts are invalid or unavailable")
+        return _error("EfficientNet-B0 artifacts are invalid or unavailable.", 503)
+    except (FileNotFoundError, KeyError):
         app.logger.exception("EfficientNet-B0 artifacts are invalid or unavailable")
         return _error("EfficientNet-B0 artifacts are invalid or unavailable.", 503)
     except Exception:

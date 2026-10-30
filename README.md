@@ -42,6 +42,8 @@ CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_UPLOAD_FOLDER=ayursatya/review
+COLAB_INFERENCE_URL=
+COLAB_INFERENCE_API_KEY=
 INFERENCE_SERVICE_URL=
 INFERENCE_SERVICE_API_KEY=
 ```
@@ -58,4 +60,4 @@ Do not enable or configure Supabase Authentication for this application. Registr
 
 Accounts created previously in Supabase Auth are separate from `public.app_users` passwords. They cannot be verified by this application because the Supabase Auth password hash is not available to the application. If the migration created an `app_users` profile with a `NULL` `password_hash`, registering again with that email initializes the application password on that existing profile. Accounts that already have an application password continue to reject duplicate registration.
 
-Do not commit `.env.local`, Cloudinary secrets, datasets, or model checkpoints. The analysis button validates and uploads the image, then uses the hosted EfficientNet-B0 service when both `INFERENCE_SERVICE_URL` and its server-side `INFERENCE_SERVICE_API_KEY` are configured. If the hosted service is not configured, it uses the local bridge when its Python environment and checkpoint are available; otherwise it returns an explicit model-unavailable result. See [`inference-service/README.md`](./inference-service/README.md) for the Render setup and checkpoint requirements.
+Do not commit `.env.local`, Cloudinary secrets, datasets, or model checkpoints. The analysis button validates the image and then uses Google Colab as the primary EfficientNet-B0 runtime when `COLAB_INFERENCE_URL` and `COLAB_INFERENCE_API_KEY` are configured server-side. Render remains an optional provider via `INFERENCE_SERVICE_URL`. If the selected hosted service is not configured, Render may use the local Python bridge when that environment and checkpoint are available; otherwise the API returns an explicit model-unavailable result. See [`inference-service/COLAB.md`](./inference-service/COLAB.md) for the Colab setup and [`inference-service/README.md`](./inference-service/README.md) for the optional Render setup.

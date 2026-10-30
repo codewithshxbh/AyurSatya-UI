@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeKnowledgeCrop, normalizeLegacyRecords, parseKnowledgeFilters, selectKnowledgeRecord } from "../lib/knowledge-filters.mjs";
+import { combineKnowledgeText, normalizeKnowledgeCrop, normalizeLegacyRecords, parseKnowledgeFilters, parseLabeledInformation, presentKnowledgeRecord, selectKnowledgeRecord } from "../lib/knowledge-filters.mjs";
 
 function filters(query = "") {
   return parseKnowledgeFilters(new URLSearchParams(query));
@@ -14,6 +14,16 @@ test("normalizes classifier plant names to database crop keys", () => {
   assert.equal(normalizeKnowledgeCrop("Neem"), "azadirachta_indica");
   assert.equal(normalizeKnowledgeCrop("Tulsi"), "ocimum_tenuiflorum");
   assert.equal(normalizeKnowledgeCrop("Kalanchoe"), "kalanchoe_pinnata");
+});
+
+test("proposed seed retrieval keys match exact crop tokens and disease labels", async () => {
+  const { parsePredictedClass } = await import("../lib/prediction-result.js");
+  assert.equal(parsePredictedClass("Neem_Spot").crop, "Neem");
+  assert.equal(parsePredictedClass("Neem_Spot").condition, "Spot");
+  assert.equal(parsePredictedClass("Neem_Web_Blight").condition, "Web Blight");
+  assert.equal(parsePredictedClass("Tulsi_Downy_Mildew").condition, "Downy Mildew");
+  assert.equal(parsePredictedClass("Kalanchoe_Healthy").crop, "Kalanchoe");
+  assert.equal(normalizeKnowledgeCrop(parsePredictedClass("Kalanchoe_Healthy").crop), "kalanchoe_pinnata");
 });
 
 test("prefers disease-specific knowledge and falls back to general", () => {
@@ -64,4 +74,71 @@ test("normalizes legacy records without verification fields", () => {
 
 test("preserves empty results", () => {
   assert.deepEqual(normalizeLegacyRecords([]), []);
+});
+
+test("typed disease lookup never returns a different disease or crop record", () => {
+  const records = [
+    { record_type: "botanical", matched_disease: "General", information: "Neem botanical" },
+    { record_type: "disease_context", matched_disease: "Spot", information: "Neem spot" },
+    { record_type: "disease_context", matched_disease: "Web Blight", information: "Neem web blight" }
+  ];
+  assert.equal(selectKnowledgeRecord(records, "Spot", "disease_context").information, "Neem spot");
+  assert.equal(selectKnowledgeRecord(records, "Downy Mildew", "disease_context"), null);
+  assert.equal(selectKnowledgeRecord(records, "General", "botanical").information, "Neem botanical");
+  assert.equal(selectKnowledgeRecord(records, "Spot", "botanical"), null);
+});
+
+test("healthy predictions can still use a botanical general profile", () => {
+  const records = [{ record_type: "botanical", matched_disease: "General", information: "Tulsi profile" }];
+  assert.equal(selectKnowledgeRecord(records, "General", "botanical").information, "Tulsi profile");
+  assert.equal(selectKnowledgeRecord(records, "Healthy", "disease_context"), null);
+});
+
+test("disease_context never falls back to a General disease record", () => {
+  const records = [
+    { record_type: "disease_context", matched_disease: "General", information: "generic disease" },
+    { record_type: "disease_context", matched_disease: "Spot", information: "Neem spot" }
+  ];
+  assert.equal(selectKnowledgeRecord(records, "Yellow", "disease_context"), null);
+  assert.equal(selectKnowledgeRecord(records, "Spot", "disease_context").information, "Neem spot");
+});
+
+test("presents knowledge text without dataset class underscores", () => {
+  const presented = presentKnowledgeRecord({
+    information: "Classification status: The model predicted the Downy_Mildew class.",
+    summary: "Tulsi_Downy_Mildew context",
+    matched_disease: "Tulsi_Downy_Mildew",
+    crop_name: "ocimum_tenuiflorum",
+    record_type: "disease_context",
+    source_title: "Resistance Against Basil Downy Mildew"
+  }, "available");
+  assert.equal(presented.information, "Classification status: The model predicted the Downy Mildew class.");
+  assert.equal(presented.summary, "Tulsi Downy Mildew context");
+  assert.equal(presented.matchedDisease, "Tulsi Downy Mildew");
+  assert.equal(presented.cropName, "ocimum tenuiflorum");
+});
+
+test("botanical presentation includes the stored summary when information is only a disclaimer", () => {
+  const combined = combineKnowledgeText({
+    information: "Botanical identity, synonym, and distribution only; this record does not make a disease, treatment, safety, or efficacy claim.",
+    summary: "Kew lists Ocimum tenuiflorum L. as an accepted species in the family Lamiaceae, native from Tropical and Subtropical Asia to the Western Pacific; Ocimum sanctum is listed as a synonym."
+  });
+  assert.match(combined, /Ocimum tenuiflorum L/);
+  assert.match(combined, /Botanical identity, synonym, and distribution only/);
+  const presented = presentKnowledgeRecord({
+    information: "Botanical identity, synonym, and distribution only; this record does not make a disease, treatment, safety, or efficacy claim.",
+    summary: "Kew lists Ocimum tenuiflorum L. as an accepted species in the family Lamiaceae.",
+    matched_disease: "General",
+    crop_name: "Tulsi",
+    record_type: "botanical"
+  }, "available");
+  assert.match(presented.information, /Kew lists Ocimum tenuiflorum L/);
+  assert.match(presented.information, /Botanical identity, synonym, and distribution only/);
+});
+
+test("parses labeled knowledge fields without dropping unmatched text", () => {
+  const parsed = parseLabeledInformation("Common name: Neem\nScientific name: Azadirachta indica\nThis is extra description.");
+  assert.equal(parsed.fields["Common name"], "Neem");
+  assert.equal(parsed.fields["Scientific name"], "Azadirachta indica");
+  assert.equal(parsed.description, "This is extra description.");
 });

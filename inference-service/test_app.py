@@ -142,20 +142,66 @@ class InferenceServiceTests(unittest.TestCase):
         self.assertEqual(response.get_json()["confidence"], 0.91)
         self.assertTrue(response.get_json()["gradcamDataUrl"].startswith("data:image/png"))
 
-    @patch("app.run_inference")
-    def test_predict_returns_inference_error(self, run_inference):
-        run_inference.side_effect = RuntimeError("model failed")
+    def _png_upload(self):
         image = Image.new("RGB", (2, 2), "white")
         image_data = io.BytesIO()
         image.save(image_data, format="PNG")
         image_data.seek(0)
-        response = self.client.post(
-            "/predict",
-            headers={"X-API-Key": "test-key"},
-            data={"file": (image_data, "leaf.png", "image/png")},
-            content_type="multipart/form-data",
-        )
+        return image_data
+
+    def _with_artifacts(self, directory):
+        for artifact in (
+            "best_efficientnet_b0.pt",
+            "class_to_index.json",
+            "training_config.json",
+        ):
+            Path(directory, artifact).write_bytes(b"artifact")
+
+    @patch("app.run_inference")
+    def test_predict_returns_inference_error(self, run_inference):
+        run_inference.side_effect = RuntimeError("model failed")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"INFERENCE_ARTIFACTS_DIR": directory}
+        ):
+            self._with_artifacts(directory)
+            response = self.client.post(
+                "/predict",
+                headers={"X-API-Key": "test-key"},
+                data={"file": (self._png_upload(), "leaf.png", "image/png")},
+                content_type="multipart/form-data",
+            )
         self.assertEqual(response.status_code, 502)
+
+    @patch("app.run_inference")
+    def test_predict_maps_undecodable_images_to_invalid_image(self, run_inference):
+        run_inference.side_effect = ValueError("The uploaded image could not be decoded.")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"INFERENCE_ARTIFACTS_DIR": directory}
+        ):
+            self._with_artifacts(directory)
+            response = self.client.post(
+                "/predict",
+                headers={"X-API-Key": "test-key"},
+                data={"file": (self._png_upload(), "leaf.png", "image/png")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "The uploaded image could not be decoded.")
+
+    @patch("app.run_inference")
+    def test_predict_maps_mapping_errors_to_invalid_artifacts(self, run_inference):
+        run_inference.side_effect = ValueError("Checkpoint and class mapping artifacts do not match.")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"INFERENCE_ARTIFACTS_DIR": directory}
+        ):
+            self._with_artifacts(directory)
+            response = self.client.post(
+                "/predict",
+                headers={"X-API-Key": "test-key"},
+                data={"file": (self._png_upload(), "leaf.png", "image/png")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 503)
 
 
 if __name__ == "__main__":

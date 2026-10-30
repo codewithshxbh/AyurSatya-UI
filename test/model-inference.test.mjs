@@ -23,16 +23,22 @@ test("disables local inference explicitly in Vercel", () => {
   else process.env.VERCEL = previous;
 });
 
-test("rejects malformed image data", async () => {
-  if (!checkpointReady) return;
+test("rejects malformed image data", { skip: !checkpointReady }, async () => {
   await assert.rejects(() => runEfficientNetInference("not-an-image"), /data URL|inference failed|could not be decoded/i);
 });
 
 test("returns a mapped class, confidence, and genuine Grad-CAM data URL", { skip: !checkpointReady }, async () => {
-  const result = await runEfficientNetInference(onePixelPng);
-  const mapping = JSON.parse(fs.readFileSync(path.join(root, "ml", "artifacts", "class_to_index.json"), "utf8"));
-  assert.ok(Object.hasOwn(mapping, result.className));
-  assert.equal(typeof result.confidence, "number");
-  assert.ok(result.confidence >= 0 && result.confidence <= 1);
-  assert.match(result.gradcamDataUrl, /^data:image\/png;base64,/);
+  const previous = process.env.ENABLE_GRADCAM;
+  process.env.ENABLE_GRADCAM = "1";
+  try {
+    const result = await runEfficientNetInference(onePixelPng);
+    const mapping = JSON.parse(fs.readFileSync(path.join(root, "ml", "artifacts", "class_to_index.json"), "utf8"));
+    assert.ok(Object.hasOwn(mapping, result.className));
+    assert.equal(typeof result.confidence, "number");
+    assert.ok(result.confidence >= 0 && result.confidence <= 1);
+    assert.match(result.gradcamDataUrl, /^data:image\/png;base64,/);
+  } finally {
+    if (previous === undefined) delete process.env.ENABLE_GRADCAM;
+    else process.env.ENABLE_GRADCAM = previous;
+  }
 });

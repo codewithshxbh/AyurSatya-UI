@@ -6,6 +6,8 @@ datasets/
 *.pt
 *.pth
 *.onnx
+*.pyc
+**/__pycache__/
 ml/runs/
 ml/artifacts/
 .venv-training/

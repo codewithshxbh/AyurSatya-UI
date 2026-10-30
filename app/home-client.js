@@ -1,0 +1,971 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import {
+  ChevronDown,
+  Menu,
+  Search,
+  X
+} from "lucide-react";
+import { combineKnowledgeText, parseLabeledInformation } from "../lib/knowledge-filters.mjs";
+import { analyzeSatelliteCoordinates } from "../lib/field-location";
+import { displayClassLabel, humanizeUserText, parsePredictedClass, SUPPORTED_CLASS_LABELS } from "../lib/prediction-result";
+
+const FieldLocationPicker = dynamic(() => import("./components/FieldLocationPicker"), {
+  ssr: false,
+  loading: () => <p className="field-location-map-status">Loading map...</p>
+});
+
+const crops = [
+  { name: "Neem", scientific: "Azadirachta indica", color: "forest", image: "/crops/neem.jpg" },
+  { name: "Tulsi", scientific: "Ocimum tenuiflorum", color: "mint", image: "/crops/tulsi.jpg" },
+  { name: "Kalanchoe", scientific: "Kalanchoe pinnata (PatharKuchi)", color: "sage", image: "/crops/kalanchoe.jpg" }
+];
+
+const supportedClasses = SUPPORTED_CLASS_LABELS.map((className) => {
+  const parsed = parsePredictedClass(className);
+  const crop = crops.find((item) => item.name === parsed?.crop);
+  return {
+    className,
+    crop: parsed?.crop || className,
+    condition: parsed?.condition || className,
+    scientific: crop?.scientific || parsed?.scientific || "",
+    color: crop?.color || "sage",
+    image: `/crops/classes/${className}.jpg`
+  };
+});
+
+export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
+  const [session, setSession] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [activeView, setActiveView] = useState("overview");
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState("");
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [storageStatus, setStorageStatus] = useState("");
+  const [loginHighlight, setLoginHighlight] = useState(initialHighlight);
+  const [knowledgeRecordCount, setKnowledgeRecordCount] = useState(knowledgeCount);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me").then((response) => response.json()).then(({ user }) => {
+      setSession(user ? { user } : null);
+      setAuthLoading(false);
+    }).catch(() => setAuthLoading(false));
+    if (initialHighlight || knowledgeCount > 0) return;
+    fetch("/api/public/highlight", { cache: "no-store" }).then((response) => response.json()).then((payload) => {
+      setLoginHighlight(payload.highlight || initialHighlight || null);
+      setKnowledgeRecordCount(payload.knowledgeCount ?? knowledgeCount ?? 0);
+    }).catch(() => {
+      setLoginHighlight(initialHighlight || null);
+    });
+  }, [initialHighlight, knowledgeCount]);
+
+  async function handleAuth(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setAuthError("");
+    const form = new FormData(event.currentTarget);
+    const email = form.get("email");
+    const password = form.get("password");
+    const fullName = form.get("fullName");
+    const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, fullName }) });
+    const result = await response.json();
+    if (!response.ok) {
+      setAuthError(result.error || "Authentication failed.");
+    } else if (authMode === "signup") {
+      setAuthEmail(email);
+      setSession({ user: result.user });
+      setActiveView("overview");
+    } else {
+      setSession({ user: result.user });
+      setActiveView("overview");
+    }
+    setAuthLoading(false);
+  }
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setSession(null);
+  }
+
+  function chooseFile(nextFile) {
+    if (!nextFile) return;
+    if (!["image/jpeg", "image/png"].includes(nextFile.type)) {
+      setUploadMessage("Choose a JPG or PNG image.");
+      return;
+    }
+    if (nextFile.size > 10 * 1024 * 1024) {
+      setUploadMessage("Images must be smaller than 10 MB.");
+      return;
+    }
+    setUploadMessage("");
+    setFile(nextFile);
+    setPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return URL.createObjectURL(nextFile);
+    });
+  }
+
+  if (!session) {
+    return (
+      <main className="auth-page">
+        <div className="auth-visual">
+          <div className="auth-visual-inner">
+            <span className="wordmark">Ayur<span>Satya</span></span>
+            <p className="overline auth-visual-overline">MEDICINAL CROP INTELLIGENCE</p>
+            <div className="auth-visual-copy">
+              <h1>Better crop health starts with a closer look.</h1>
+              <p>Bring together image intelligence and plant knowledge in one focused workspace.</p>
+              <aside className="login-highlight">
+                <p className="overline">RESEARCH HIGHLIGHT</p>
+                {loginHighlight ? (
+                  <>
+                    <strong>{humanizeUserText(loginHighlight.cropName)}</strong>
+                    <p>{humanizeUserText(loginHighlight.summary)}</p>
+                    {loginHighlight.sourceTitle && <small>{humanizeUserText(loginHighlight.sourceTitle)}{loginHighlight.sourceInstitution ? ` · ${humanizeUserText(loginHighlight.sourceInstitution)}` : ""}</small>}
+                  </>
+                ) : (
+                  <>
+                    <strong>Sourced plant records</strong>
+                    <p>This workspace reads botanical notes from the knowledge database when the sign-in screen loads.</p>
+                  </>
+                )}
+                <small className="login-highlight-count">{knowledgeRecordCount ? `${knowledgeRecordCount} sourced records currently in the knowledge database.` : "Connecting to the knowledge database..."}</small>
+              </aside>
+            </div>
+            <div className="leaf-line"><span /><span /><span /></div>
+          </div>
+        </div>
+        <div className="auth-panel">
+          <div className="auth-panel-inner">
+            <span className="mobile-wordmark wordmark">Ayur<span>Satya</span></span>
+            <p className="overline">{authMode === "login" ? "WELCOME BACK" : "CREATE YOUR WORKSPACE"}</p>
+            <h2>{authMode === "login" ? "Sign in to AyurSatya" : "Create your account"}</h2>
+            <p className="auth-description">{authMode === "login" ? "Access your analyses, crop notes, and saved insights." : "Save your crop analyses and keep your research in one place."}</p>
+            <form onSubmit={handleAuth} className="auth-form">
+              {authMode === "signup" && <Field label="Full name" name="fullName" placeholder="Your name" />}
+              <Field label="Email address" name="email" type="email" placeholder="you@example.com" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} />
+              <Field label="Password" name="password" type="password" placeholder="At least 6 characters" />
+              <button className="button button-primary auth-submit" disabled={authLoading}>{authLoading ? "Please wait..." : authMode === "login" ? "Sign in" : "Create account"}</button>
+              {authError && <p className="form-error">{authError}</p>}
+            </form>
+            <p className="auth-switch">{authMode === "login" ? "New to AyurSatya?" : "Already have an account?"} <button onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }}>{authMode === "login" ? "Create an account" : "Sign in"}</button></p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const name = session.user.full_name || session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "Researcher";
+  const firstName = name.split(" ")[0];
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+        <div className="sidebar-top"><span className="wordmark">Ayur<span>Satya</span></span><button className="sidebar-close" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
+        <p className="nav-label">WORKSPACE</p>
+        <nav className="nav-list">
+          <NavButton label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
+          <NavButton label="Analysis" active={activeView === "analysis"} onClick={() => setActiveView("analysis")} />
+          <NavButton label="Analysis history" active={activeView === "history"} onClick={() => { setSelectedHistoryItem(null); setActiveView("history"); }} />
+          <NavButton label="Knowledge base" active={activeView === "knowledge"} onClick={() => setActiveView("knowledge")} />
+        </nav>
+        <div className="sidebar-bottom">
+          <NavButton label="Profile & settings" active={activeView === "profile"} onClick={() => setActiveView("profile")} />
+          <button className="nav-button" onClick={signOut}>Sign out</button>
+          <div className="sidebar-account"><Avatar user={session.user} name={name} size="small" /><div><strong>{name}</strong><span>{session.user.email}</span></div></div>
+        </div>
+      </aside>
+      <main className="main">
+        <button className="mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={22} strokeWidth={2} /></button>
+        {activeView === "overview" && <Overview firstName={firstName} setActiveView={setActiveView} onOpenHistoryItem={(item) => { setSelectedHistoryItem(item); setActiveView("history"); }} />}
+        {activeView === "analysis" && <Analysis file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} storageStatus={storageStatus} setStorageStatus={setStorageStatus} />}
+        {activeView === "history" && <HistoryView userId={session.user.id} initialSelectedItem={selectedHistoryItem} onClearSelectedItem={() => setSelectedHistoryItem(null)} />}
+        {activeView === "knowledge" && <Knowledge />}
+        {activeView === "profile" && <Profile user={session.user} name={name} email={session.user.email} onProfileUpdated={(user) => setSession((current) => current ? { ...current, user: { ...current.user, ...user } } : current)} />}
+      </main>
+    </div>
+  );
+}
+
+function Field({ label, name, type = "text", placeholder, value, onChange }) {
+  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} value={value} onChange={onChange} required minLength={type === "password" ? 6 : undefined} /></label>;
+}
+
+function NavButton({ label, active, onClick }) {
+  return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}>{label}</button>;
+}
+
+function toHistoryItem(item) {
+  return {
+    id: item.id,
+    crop: item.result?.visual?.crop || item.crop_name,
+    createdAt: item.created_at,
+    date: new Date(item.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+    status: item.result?.visual?.condition || item.result?.visual?.disease || "Analyzed",
+    confidence: typeof item.result?.visual?.confidence === "number" ? `${(item.result.visual.confidence * 100).toFixed(1)}%` : "—",
+    color: crops.find((crop) => crop.name === item.crop_name)?.color || "sage",
+    imageUrls: getAnalysisImageUrls(item),
+    result: item.result || {}
+  };
+}
+
+function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
+  const [analyses, setAnalyses] = useState([]);
+  const [totalAnalyses, setTotalAnalyses] = useState(0);
+  const [validatedAnalyses, setValidatedAnalyses] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const loadOverview = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const response = await fetch("/api/analyses", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load analysis history.");
+      setAnalyses(payload.analyses || []);
+      setTotalAnalyses(payload.total ?? payload.analyses?.length ?? 0);
+      setValidatedAnalyses(payload.validated ?? 0);
+    } catch (error) {
+      console.error("Overview analysis lookup failed", error);
+      setHistoryError("Analysis activity is temporarily unavailable.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
+  const now = new Date();
+  const dateLabel = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric"
+  }).format(now).toUpperCase();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  return (
+    <section className="page">
+      <div className="page-heading">
+        <div>
+          <p className="overline">{dateLabel}</p>
+          <h1>{greeting}, {firstName}.</h1>
+          <p className="lead">A clear view of the work happening in your crop workspace.</p>
+        </div>
+        <button className="button button-primary" onClick={() => setActiveView("analysis")}>New analysis</button>
+      </div>
+      <div className="stats">
+        <Stat label="Total analyses" value={historyLoading ? "—" : totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} />
+        <Stat label="Validated results" value={historyLoading ? "—" : validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} />
+        <Stat label="Supported classes" value={supportedClasses.length} detail="12 labels from the local dataset" />
+      </div>
+      <div className="section-title">
+        <div>
+          <h2>Supported classes</h2>
+          <p>Automatic identification currently supports 12 classes across Neem, Tulsi, and Kalanchoe (PatharKuchi, Kalanchoe pinnata).</p>
+        </div>
+        <button className="link-button" onClick={() => setActiveView("analysis")}>New analysis</button>
+      </div>
+      <div className="crop-grid">
+        {supportedClasses.map((item) => (
+          <button key={item.className} className="crop-card" type="button" onClick={() => setActiveView("analysis")}>
+            <div className={`crop-image ${item.color}`}>
+              <img src={item.image} alt={`${item.crop} ${item.condition} leaf from the Medicinal Plant Leaf Disease Dataset, CC BY 4.0`} title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} loading="eager" decoding="async" />
+            </div>
+            <div className="crop-card-meta">
+              <strong>{item.crop}</strong>
+              <small>{item.condition}</small>
+              <span>{item.scientific}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div className="section-title">
+        <div>
+          <h2>Recent analyses</h2>
+          <p>Your latest saved crop intelligence reports.</p>
+        </div>
+        <button className="link-button" onClick={() => setActiveView("history")}>See history</button>
+      </div>
+      {historyLoading ? (
+        <div className="history-card-grid">{[1, 2, 3].map((item) => <div className="skeleton skeleton-crop" key={item} />)}</div>
+      ) : historyError ? (
+        <div className="panel empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div>
+      ) : analyses.length ? (
+        <div className="history-card-grid">
+          {analyses.slice(0, 3).map((item, index) => {
+            const historyItem = toHistoryItem(item);
+            return <AnalysisRow key={historyItem.id || `${historyItem.crop}-${index}`} item={historyItem} onOpen={() => onOpenHistoryItem(historyItem)} />;
+          })}
+        </div>
+      ) : (
+        <div className="panel empty-state"><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>
+      )}
+      <div className="panel note-panel note-banner">
+        <div>
+          <p className="overline">FIELD NOTE</p>
+          <h2>Good images create better answers.</h2>
+          <p>Use natural light, a plain background, and show the whole leaf whenever possible.</p>
+        </div>
+        <button className="button button-secondary" onClick={() => setActiveView("analysis")}>Upload an image</button>
+      </div>
+    </section>
+  );
+}
+
+function Stat({ label, value, detail }) {
+  return (
+    <div className="stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function AnalysisRow({ item, onOpen }) {
+  return (
+    <button className="analysis-card" type="button" onClick={onOpen} aria-label={`Open ${item.crop} analysis from ${item.date}`}>
+      <div className={`analysis-card-media ${item.color}`}>
+        {item.imageUrls?.[0] ? <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <span>No image</span>}
+      </div>
+      <div className="analysis-card-body">
+        <strong>{item.crop}</strong>
+        <small>{item.status}</small>
+        <span>{item.date}{item.imageUrls?.length > 1 ? ` · ${item.imageUrls.length} images` : ""}</span>
+        <b>{item.confidence}</b>
+      </div>
+    </button>
+  );
+}
+
+function HistoryDetail({ item, onBack, loading }) {
+  return <div className="history-detail"><div className="history-detail-actions"><button className="button button-secondary" type="button" onClick={onBack}>Back to history</button><span className="status review">{loading ? "Loading report..." : "Saved analysis"}</span></div><AssessmentReport result={item.result || {}} preview={item.imageUrls?.[0] || ""} imageFallback={item} /></div>;
+}
+
+function getAnalysisImageUrls(item) {
+  const values = [item.image_path, item.result?.imageUrls, item.result?.images, item.result?.imageUrl].flat(Infinity);
+  return [...new Set(values.flatMap((value) => {
+    if (typeof value !== "string" || !value.trim()) return [];
+    const trimmed = value.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed.filter((url) => typeof url === "string") : [];
+      } catch {
+        return [];
+      }
+    }
+    return [trimmed];
+  }))];
+}
+
+function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, storageStatus, setStorageStatus }) {
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [locationConfirmed, setLocationConfirmed] = useState(false);
+  const [satelliteContext, setSatelliteContext] = useState("none");
+  const [provider, setProvider] = useState("colab");
+  const [colabStatus, setColabStatus] = useState("");
+  const [colabChecking, setColabChecking] = useState(false);
+  async function checkColabStatus() {
+    setColabChecking(true);
+    try {
+      const response = await fetch("/api/inference/colab-status", { cache: "no-store" });
+      const payload = await response.json();
+      setColabStatus(payload.status || "offline");
+      return payload.status === "available";
+    } catch {
+      setColabStatus("offline");
+      return false;
+    } finally {
+      setColabChecking(false);
+    }
+  }
+  async function runAnalysis() {
+    if (!file) return;
+    const satelliteCoordinates = analyzeSatelliteCoordinates(satelliteContext, latitude, longitude, locationConfirmed);
+    if (satelliteContext === "coordinates" && !satelliteCoordinates.latitude) {
+      setUploadMessage("Select and confirm a field location before including satellite context.");
+      return;
+    }
+    setAnalysisLoading(true);
+    setUploadMessage("");
+    try {
+      if (provider === "colab" && !(await checkColabStatus())) {
+        setUploadMessage("Google Colab is offline. Start the notebook runtime and tunnel, then use Check Colab again.");
+        return;
+      }
+      const imageData = await fileToDataUrl(file);
+      let imageUrl = null;
+      setStorageStatus("Uploading original image...");
+      const uploadForm = new FormData();
+      uploadForm.append("file", file);
+      const uploadResponse = await fetch("/api/upload", { method: "POST", body: uploadForm });
+      const uploadPayload = await uploadResponse.json();
+      let storageWarning = "";
+      if (uploadResponse.ok && uploadPayload.secureUrl) {
+        imageUrl = uploadPayload.secureUrl;
+        setStorageStatus("Original image stored securely.");
+      } else {
+        storageWarning = "The original image was not stored, so history may not keep a photo. Analysis continued from the image in memory.";
+        setStorageStatus(storageWarning);
+      }
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageData, imageUrl, provider, latitude: satelliteCoordinates.latitude, longitude: satelliteCoordinates.longitude })
+      });
+      const payload = await response.json();
+      if (!response.ok) setUploadMessage(payload.error || "The analysis could not be completed.");
+      else {
+        setAnalysisResult(payload);
+        const saveResponse = await fetch("/api/analyses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imagePath: payload.imageUrl, result: payload })
+        });
+        if (!saveResponse.ok) setUploadMessage("Analysis completed, but it could not be saved to history.");
+        else if (storageWarning) setUploadMessage(storageWarning);
+      }
+    } catch (error) {
+      console.error("Analysis flow failed", error);
+      setUploadMessage("The analysis could not be completed. Check your connection and try again.");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }
+  return (
+    <section className="page">
+      <div className="page-heading compact-heading">
+        <div>
+          <p className="overline">NEW ANALYSIS</p>
+          <h1>{analysisResult ? "Leaf assessment." : "Upload a leaf image."}</h1>
+          <p className="lead">{analysisResult ? "Image classification, botanical references, and satellite observations are shown as separate evidence." : "Automatic identification currently supports 12 classes across Neem, Tulsi, and Kalanchoe (PatharKuchi, Kalanchoe pinnata). You do not need to select a plant first."}</p>
+        </div>
+      </div>
+      {analysisResult ? (
+        <AnalysisResult result={analysisResult} preview={preview} onNew={() => setAnalysisResult(null)} />
+      ) : (
+        <div className="analysis-workspace">
+          <div className="panel upload-panel">
+            <div className="upload-grid">
+              <div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}>
+                <input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} />
+                <label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><strong>Upload leaf image</strong><span>The model will detect Neem, Tulsi, or Kalanchoe from the image</span><small>JPG or PNG, up to 10 MB</small></>}</label>
+              </div>
+              <div className="upload-controls">
+                <FilterSelect
+                  label="Inference provider"
+                  value={provider}
+                  options={[{ value: "colab", label: "Google Colab (primary)" }, { value: "render", label: "Render (optional)" }]}
+                  onChange={(value) => { setProvider(value); setColabStatus(""); }}
+                />
+                {provider === "colab" && (
+                  <div className="provider-status">
+                    <span className={`status ${colabStatus === "available" ? "healthy" : "review"}`}>{colabChecking ? "Checking Colab..." : colabStatus === "available" ? "Colab available" : colabStatus === "unconfigured" ? "Colab not configured" : colabStatus === "offline" ? "Colab offline" : "Colab not checked"}</span>
+                    <button type="button" className="link-button" onClick={checkColabStatus} disabled={colabChecking}>{colabChecking ? "Checking..." : "Check status"}</button>
+                  </div>
+                )}
+                <FilterSelect
+                  label="Satellite context"
+                  value={satelliteContext}
+                  options={[{ value: "none", label: "No, analyze the leaf image only" }, { value: "coordinates", label: "Yes, select a field location" }]}
+                  onChange={setSatelliteContext}
+                />
+                {satelliteContext === "coordinates" && (
+                  <p className="privacy">Use the map below to search or click the field. Confirm the point before running analysis.</p>
+                )}
+                {storageStatus && <p className="privacy">{storageStatus}</p>}
+                {uploadMessage && <p className="form-error">{uploadMessage}</p>}
+                <button className="button button-primary full-button" disabled={!file || analysisLoading || colabChecking} onClick={runAnalysis}>{analysisLoading ? "Preparing report..." : "Run analysis"}</button>
+                <p className="privacy">{provider === "colab" ? "Colab is the primary inference runtime and works only while its notebook and tunnel are active." : "Render is an optional inference provider. Disease prediction uses the configured Render service when selected."}</p>
+              </div>
+            </div>
+            {satelliteContext === "coordinates" && (
+              <FieldLocationPicker
+                latitude={latitude}
+                longitude={longitude}
+                confirmed={locationConfirmed}
+                onConfirm={(location) => {
+                  setLatitude(String(location.latitude));
+                  setLongitude(String(location.longitude));
+                  setLocationConfirmed(true);
+                }}
+                onClear={() => {
+                  setLatitude("");
+                  setLongitude("");
+                  setLocationConfirmed(false);
+                }}
+              />
+            )}
+          </div>
+          <div className="panel process-panel">
+            <div className="process-heading">
+              <div>
+                <h2>Separated evidence</h2>
+                <p>The report does not mix image classification with botanical, disease, traditional, or satellite sources.</p>
+              </div>
+            </div>
+            <div className="process-grid">
+              <div className="process-line"><strong>Image classification</strong><small>EfficientNet-B0 predicts one of 12 supported crop and condition labels.</small></div>
+              <div className="process-line"><strong>Plant, disease, and traditional records</strong><small>Shown only when a matching sourced knowledge record exists.</small></div>
+              <div className="process-line"><strong>Satellite field context</strong><small>Sentinel-2 NDVI and McFeeters NDWI when coordinates and bands are available.</small></div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function AnalysisResult({ result, preview, onNew }) {
+  const visual = result.visual || {};
+  const modelStatus = visual.model?.status;
+  const statusLabel = visual.condition ? "Preliminary result" : modelStatus === "not_configured" ? "Inference unavailable" : modelStatus === "service_unavailable" ? "Service unavailable" : modelStatus === "invalid_image" ? "Invalid image" : "No compatible prediction";
+  const statusClass = visual.healthy ? "healthy" : "review";
+  return <div className="report"><div className="report-actions"><span className={`status ${statusClass}`}>{statusLabel}</span><button className="button button-secondary" onClick={onNew}>New analysis</button></div><AssessmentReport result={result} preview={preview} /></div>;
+}
+
+function formatIndex(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "Unavailable";
+}
+
+function satelliteStatusLabel(satellite) {
+  if (satellite?.status === "available") return "Available";
+  if (satellite?.status === "requires_coordinates") return "Requires coordinates";
+  if (satellite?.status === "processing_failed") return "Processing failed";
+  return "Not available";
+}
+
+function knowledgeStatusLabel(record) {
+  if (record?.status === "available") return "Available";
+  if (record?.status === "not_applicable") return "Not applicable";
+  return "Not available";
+}
+
+function SourceBox({ record }) {
+  if (!record?.source) return null;
+  return (
+    <footer className="knowledge-source-footer">
+      <span className="knowledge-source-label">Source</span>
+      <strong>{record.source}{record.sourceInstitution ? ` · ${record.sourceInstitution}` : ""}{record.sourceLocator ? ` · ${record.sourceLocator}` : ""}</strong>
+      {record.sourceUrl && <a className="knowledge-source-link" href={record.sourceUrl} target="_blank" rel="noreferrer">Open source</a>}
+    </footer>
+  );
+}
+
+function LabeledKnowledge({ record, fallback, extraFields }) {
+  const parsed = parseLabeledInformation(humanizeUserText(combineKnowledgeText(record) || record?.information || ""));
+  const fields = { ...(extraFields || {}), ...parsed.fields };
+  const entries = Object.entries(fields);
+  const description = parsed.description || (!entries.length ? record?.information : "");
+  if (!entries.length && !description) return <p>{fallback}</p>;
+  return (
+    <>
+      {entries.length > 0 && <div className="profile-fields">{entries.map(([label, value]) => <div key={label}><span>{label}</span><strong>{humanizeUserText(value)}</strong></div>)}</div>}
+      {description && <p>{humanizeUserText(description)}</p>}
+    </>
+  );
+}
+
+function AssessmentReport({ result, preview, imageFallback }) {
+  const visual = result.visual || {};
+  const knowledge = result.knowledge || {};
+  const plantProfile = knowledge.plantProfile || {};
+  const disease = knowledge.disease || {};
+  const traditional = knowledge.traditional || {};
+  const satellite = result.satellite || {};
+  const heatmap = visual.explainability?.status === "available" && typeof visual.explainability?.heatmap === "string" && visual.explainability.heatmap.startsWith("data:image/")
+    ? visual.explainability.heatmap
+    : null;
+  const detectedTitle = visual.crop && visual.condition ? `${visual.crop} / ${visual.condition}` : "No prediction available";
+  return <div className="assessment-stack">
+    <div className="report-grid">
+      <div className="panel report-image">
+        {preview ? <img src={preview} alt="Analyzed leaf" /> : imageFallback?.imageUrls?.length ? imageFallback.imageUrls.map((url, index) => <img key={`${url}-${index}`} src={url} alt={`${visual.crop || "Leaf"} image ${index + 1}`} onError={(event) => { event.currentTarget.remove(); }} />) : <div className="history-image-fallback sage"><span>No stored image</span></div>}
+        <div><p className="overline">UPLOADED LEAF</p><h2>{detectedTitle}</h2><p>{visual.summary || "The uploaded image has not received a model prediction."}</p></div>
+      </div>
+      <div className="panel result-card">
+        <p className="overline">DETECTED PLANT</p>
+        <h2>{visual.crop || "Not detected"}</h2>
+        <p>{visual.scientificName ? `${visual.scientificName}${visual.family ? ` · ${visual.family}` : ""}` : "Scientific name is shown only for the three supported plants."}</p>
+        <div className="confidence"><span>Model confidence (uncalibrated softmax)</span><strong>{typeof visual.confidence === "number" ? `${(visual.confidence * 100).toFixed(1)}%` : "—"}</strong></div>
+        <p>{visual.limitations}</p>
+        <p className="assessment-note">If this leaf does not look like Neem, Tulsi, or Kalanchoe (PatharKuchi, Kalanchoe pinnata), treat the result as outside the 12 supported classes. A user correction is not stored in place of the model prediction.</p>
+      </div>
+    </div>
+    <section className="panel report-section report-section-wide">
+      <div className="section-heading"><h2>Grad-CAM explainability</h2><span className="badge">{heatmap ? "Available" : "Not available"}</span></div>
+      {heatmap ? <div className="gradcam-pair">{preview ? <div className="gradcam-frame"><img src={preview} alt="Original leaf" /></div> : null}<div className="gradcam-frame"><img src={heatmap} alt="Grad-CAM overlay for the predicted class" /></div></div> : <p>No heatmap is shown because Grad-CAM was not returned for this inference.</p>}
+      <p>{heatmap ? "The overlay marks image regions that influenced the predicted class. It does not prove a causal diagnosis." : visual.explainability?.message}</p>
+    </section>
+    <div className="report-sections">
+      <section className="panel report-section">
+        <div className="section-heading"><h2>Plant profile</h2><span className="badge">{knowledgeStatusLabel(plantProfile)}</span></div>
+        <div className="report-section-body">
+          {plantProfile.status === "available" ? <LabeledKnowledge record={plantProfile} extraFields={visual.crop ? { "Common name": visual.crop, ...(visual.scientificName ? { "Scientific name": visual.scientificName } : {}), ...(visual.family ? { Family: visual.family } : {}) } : undefined} fallback="No botanical plant profile is currently stored for this detected plant." /> : <p>{humanizeUserText(plantProfile.information) || "No botanical plant profile is currently stored for this detected plant."}</p>}
+        </div>
+        <SourceBox record={plantProfile} />
+      </section>
+      <section className="panel report-section">
+        <div className="section-heading"><h2>Disease information</h2><span className="badge">{knowledgeStatusLabel(disease)}</span></div>
+        <div className="report-section-body">
+          {disease.status === "available" ? <LabeledKnowledge record={disease} fallback="Detailed disease information is not currently available." /> : <p>{humanizeUserText(disease.information) || "Detailed disease information is not currently available."}</p>}
+        </div>
+        <SourceBox record={disease} />
+      </section>
+      <section className="panel report-section">
+        <div className="section-heading"><h2>Traditional references</h2><span className="badge">{knowledgeStatusLabel(traditional)}</span></div>
+        <div className="report-section-body">
+          {traditional.status === "available" ? <LabeledKnowledge record={traditional} fallback="No verified traditional reference available." /> : <p>{humanizeUserText(traditional.information) || "No verified traditional reference available."}</p>}
+        </div>
+        <SourceBox record={traditional} />
+      </section>
+    </div>
+    <div className="report-sections report-sections-2">
+      <section className="panel report-section">
+        <div className="section-heading"><h2>Satellite field context</h2><span className="badge">{satelliteStatusLabel(satellite)}</span></div>
+        <div className="report-section-body">
+          <p>{satellite.summary || "Field context requires a location."}</p>
+          <div className="satellite-metrics">
+            <Metric label="NDVI" value={formatIndex(satellite.ndvi)} />
+            <Metric label="NDWI (McFeeters)" value={formatIndex(satellite.ndwi)} />
+            <Metric label="NDMI" value={formatIndex(satellite.ndmi)} />
+            <Metric label="Scene date" value={satellite.sceneDate || "Not queried"} />
+            <Metric label="Cloud cover" value={typeof satellite.cloudCover === "number" ? `${satellite.cloudCover.toFixed(1)}%` : "Unavailable"} />
+            <Metric label="Coordinates" value={Number.isFinite(satellite.latitude) && Number.isFinite(satellite.longitude) ? `${satellite.latitude.toFixed(4)}, ${satellite.longitude.toFixed(4)}` : "Not supplied"} />
+          </div>
+        </div>
+        <p className="source">{[satellite.ndviDefinition, satellite.ndwiDefinition, satellite.ndmiDefinition, satellite.source].filter(Boolean).join(" ")} These indices describe field vegetation and water contrast, not a confirmed leaf disease.</p>
+      </section>
+      <section className="panel report-section">
+        <div className="section-heading"><h2>Sources and limitations</h2></div>
+        <div className="report-section-body">
+          <p>These evidence sources stay separate. They are not interchangeable, and this report is not a medical or agronomic confirmation.</p>
+          <div className="limitation-grid">
+            <div className="limitation-item"><strong>Image model</strong><small>Leaf classification only.</small></div>
+            <div className="limitation-item"><strong>Botanical records</strong><small>Sourced plant identity.</small></div>
+            <div className="limitation-item"><strong>Disease records</strong><small>Literature context.</small></div>
+            <div className="limitation-item"><strong>Traditional notes</strong><small>Historical references.</small></div>
+            <div className="limitation-item"><strong>Satellite indices</strong><small>Field vegetation contrast.</small></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>;
+}
+
+function Metric({ label, value }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
+  const [items, setItems] = useState([]);
+  const [selectedItem, setSelectedItem] = useState(initialSelectedItem);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState("30");
+  useEffect(() => {
+    setSelectedItem(initialSelectedItem);
+  }, [initialSelectedItem]);
+  useEffect(() => {
+    const id = selectedItem?.id;
+    if (!id) return undefined;
+    let cancelled = false;
+    setDetailLoading(true);
+    fetch(`/api/analyses/${id}`, { cache: "no-store" })
+      .then((response) => response.json().then((payload) => ({ ok: response.ok, payload })))
+      .then(({ ok, payload }) => {
+        if (cancelled || !ok || !payload.analysis) return;
+        setSelectedItem(toHistoryItem(payload.analysis));
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItem?.id]);
+  useEffect(() => {
+    fetch("/api/analyses", { cache: "no-store" }).then((response) => response.json()).then(({ analyses }) => {
+      if (analyses?.length) setItems(analyses.map(toHistoryItem));
+    }).finally(() => setLoading(false));
+  }, [userId]);
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const cutoff = dateRange === "all" ? 0 : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000;
+  const filteredItems = items.filter((item) => {
+    const matchesSearch = !normalizedQuery || `${item.crop} ${item.status}`.toLowerCase().includes(normalizedQuery);
+    const matchesDate = dateRange === "all" || new Date(item.createdAt).getTime() >= cutoff;
+    return matchesSearch && matchesDate;
+  });
+  return (
+    <section className="page">
+      <div className="page-heading compact-heading">
+        <div>
+          <p className="overline">YOUR WORKSPACE</p>
+          <h1>Analysis history.</h1>
+          <p className="lead">Review previous results and keep your research connected.</p>
+        </div>
+      </div>
+      {selectedItem ? (
+        <HistoryDetail item={selectedItem} loading={detailLoading} onBack={() => { setSelectedItem(null); onClearSelectedItem(); }} />
+      ) : (
+        <div className="history-workspace">
+          <div className="panel history-panel">
+            <div className="history-tools">
+              <label className="search-box" aria-label="Search analyses"><Search size={16} /><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search by crop or result" /></label>
+              <HistoryFilterSelect value={dateRange} onChange={setDateRange} />
+            </div>
+          </div>
+          {loading ? (
+            <div className="history-card-grid">{[1, 2, 3, 4, 5, 6].map((item) => <div className="skeleton skeleton-crop" key={item} />)}</div>
+          ) : filteredItems.length ? (
+            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />)}</div>
+          ) : (
+            <div className="panel empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoryFilterSelect({ value, onChange }) {
+  const options = [{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }];
+  return <div className="history-range filter-select-wrap"><span>Showing</span><FilterSelect value={value} options={options} onChange={onChange} ariaLabel="Filter analyses by date" compact /></div>;
+}
+
+function Knowledge() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [cropFilter, setCropFilter] = useState("");
+  const [diseaseFilter, setDiseaseFilter] = useState("");
+  const [recordTypeFilter, setRecordTypeFilter] = useState("");
+  const loadKnowledge = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams();
+    if (cropFilter) params.set("crop", cropFilter);
+    if (diseaseFilter.trim()) params.set("disease", diseaseFilter.trim());
+    if (recordTypeFilter) params.set("recordType", recordTypeFilter);
+    try {
+      const response = await fetch(`/api/knowledge?${params}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load knowledge records.");
+      setRecords(payload.records || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [cropFilter, diseaseFilter, recordTypeFilter]);
+  useEffect(() => {
+    loadKnowledge();
+  }, [loadKnowledge]);
+  return (
+    <section className="page">
+      <div className="page-heading compact-heading">
+        <div>
+          <p className="overline">KNOWLEDGE BASE</p>
+          <h1>Sourced plant and disease records.</h1>
+          <p className="lead">Botanical, disease, and traditional records are stored separately and are not a substitute for the image model.</p>
+        </div>
+        <span className="knowledge-count">{records.length} records</span>
+      </div>
+      <div className="knowledge-intro panel">
+        <div>
+          <strong>Read the evidence around the image.</strong>
+          <p>Botanical identity, disease context, and traditional references are stored as separate record types. They do not replace the image model or field verification.</p>
+        </div>
+      </div>
+      <div className="knowledge-filters panel">
+        <FilterSelect label="Crop" value={cropFilter} placeholder="All crops" options={crops.map((crop) => ({ value: crop.name, label: crop.name }))} onChange={setCropFilter} />
+        <label className="field"><span>Disease or condition</span><input value={diseaseFilter} onChange={(event) => setDiseaseFilter(event.target.value)} placeholder="Exact record condition" /></label>
+        <FilterSelect label="Record type" value={recordTypeFilter} placeholder="All types" options={[{ value: "general_crop", label: "General crop" }, { value: "botanical", label: "Botanical" }, { value: "traditional_reference", label: "Traditional reference" }, { value: "disease_context", label: "Disease context" }]} onChange={setRecordTypeFilter} />
+      </div>
+      {loading ? (
+        <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div>
+      ) : error ? (
+        <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div>
+      ) : records.length ? (
+        <div className="knowledge-grid">
+          {records.map((item) => (
+            <article className="knowledge-card" key={item.id}>
+              <p className="overline">{humanizeUserText(item.crop_name)} · {humanizeUserText(item.record_type)}</p>
+              <h2>{humanizeUserText(item.matched_disease)}</h2>
+              <div className="knowledge-card-body"><p>{humanizeUserText(item.summary || item.information)}</p></div>
+              <div className="knowledge-source"><span>{item.source_title}{item.source_institution ? ` · ${item.source_institution}` : ""}{item.source_locator ? ` · ${item.source_locator}` : ""}</span></div>
+              {item.source_url && <a className="link-button" href={item.source_url} target="_blank" rel="noreferrer">Open source reference</a>}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="panel empty-state"><strong>No knowledge records</strong><span>Add source-backed crop records to the knowledge table.</span></div>
+      )}
+    </section>
+  );
+}
+
+function FilterSelect({ label, value, placeholder, options, onChange, ariaLabel, compact = false }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+  const selectedLabel = options.find((option) => option.value === value)?.label || placeholder;
+  useEffect(() => {
+    function closeOnOutside(event) {
+      if (!containerRef.current?.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => document.removeEventListener("mousedown", closeOnOutside);
+  }, []);
+  const menuOptions = placeholder ? [{ value: "", label: placeholder }, ...options] : options;
+  return <div className={`${compact ? "filter-select filter-select-compact" : "field filter-select"} ${open ? "is-open" : ""}`} ref={containerRef}>{label && <span>{label}</span>}<button type="button" className="filter-select-trigger" aria-label={ariaLabel || label} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}><span className={!value ? "is-placeholder" : ""}>{selectedLabel}</span><ChevronDown size={16} /></button>{open && <div className="filter-select-menu" role="listbox" aria-label={ariaLabel || label}>{menuOptions.map((option) => <button type="button" role="option" aria-selected={value === option.value} className={value === option.value ? "is-selected" : ""} key={option.value || "all"} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}</div>}</div>;
+}
+
+function Avatar({ user, name, size = "large" }) {
+  return user?.avatar_url
+    ? <img className={`user-avatar user-avatar-${size}`} src={user.avatar_url} alt={`${name} profile`} />
+    : <div className={`avatar-fallback avatar-fallback-${size}`}>{name.slice(0, 2).toUpperCase()}</div>;
+}
+
+function Profile({ user, name, email, onProfileUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [fullName, setFullName] = useState(name);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteForm, setDeleteForm] = useState({ password: "", confirmation: "" });
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+
+  async function uploadAvatar(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setAvatarError("Choose a JPG, PNG, or WebP image up to 5 MB.");
+      return;
+    }
+    setAvatarBusy(true);
+    setAvatarError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/auth/avatar", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "The profile photo could not be uploaded.");
+      onProfileUpdated(payload.user);
+    } catch (requestError) {
+      setAvatarError(requestError.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarBusy(true);
+    setAvatarError("");
+    try {
+      const response = await fetch("/api/auth/avatar", { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "The profile photo could not be removed.");
+      onProfileUpdated(payload.user);
+    } catch (requestError) {
+      setAvatarError(requestError.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your profile could not be updated.");
+      onProfileUpdated(payload.user);
+      setFullName(payload.user.full_name);
+      setEditing(false);
+      setMessage("Profile updated.");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    setPasswordMessage("");
+    setPasswordError("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("New passwords do not match.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/auth/password", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(passwordForm) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your password could not be changed.");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordOpen(false);
+      setPasswordMessage("Password changed. Other sessions were signed out.");
+    } catch (requestError) {
+      setPasswordError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteAccount(event) {
+    event.preventDefault();
+    setDeleteError("");
+    setDeleting(true);
+    try {
+      const response = await fetch("/api/auth/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(deleteForm) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Your account could not be deleted.");
+      window.location.reload();
+    } catch (requestError) {
+      setDeleteError(requestError.message);
+      setDeleting(false);
+    }
+  }
+
+  return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Manage your identity and account security.</p></div></div><div className="settings-grid"><div className="panel profile-panel settings-span"><div className="profile-photo-column"><Avatar user={user} name={name} /><label className="button button-secondary avatar-upload">{avatarBusy ? "Saving..." : "Upload photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadAvatar} disabled={avatarBusy} /></label>{user.avatar_url && <button className="avatar-remove" type="button" onClick={removeAvatar} disabled={avatarBusy}>Remove photo</button>}{avatarError && <p className="form-error">{avatarError}</p>}</div><div className="profile-details"><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p>{editing ? <form className="profile-edit-form" onSubmit={saveProfile}><label className="field"><span>Display name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={80} required autoFocus /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button className="button button-secondary" type="button" onClick={() => { setEditing(false); setFullName(name); setError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setEditing(true); setMessage(""); setError(""); }}>Edit profile</button>}{message && <p className="form-success">{message}</p>}{error && <p className="form-error">{error}</p>}</div></div><div className="panel settings-card"><div className="settings-card-heading"><div><p className="overline">SECURITY</p><h2>Password</h2></div></div><p>Change your password without exposing it to the browser or database logs.</p>{passwordOpen ? <form className="settings-form" onSubmit={changePassword}><label className="field"><span>Current password</span><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required /></label><label className="field"><span>New password</span><input type="password" minLength={8} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label><label className="field"><span>Confirm new password</span><input type="password" minLength={8} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Updating..." : "Update password"}</button><button className="button button-secondary" type="button" onClick={() => { setPasswordOpen(false); setPasswordError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setPasswordOpen(true); setPasswordMessage(""); setPasswordError(""); }}>Change password</button>}{passwordMessage && <p className="form-success">{passwordMessage}</p>}{passwordError && <p className="form-error">{passwordError}</p>}</div><div className="panel settings-card danger-card"><div className="settings-card-heading"><div><p className="overline">DANGER ZONE</p><h2>Delete account</h2></div></div><p>Remove your account, saved analyses, and active sessions permanently.</p>{deleteOpen ? <form className="settings-form" onSubmit={deleteAccount}><label className="field"><span>Current password</span><input type="password" value={deleteForm.password} onChange={(event) => setDeleteForm({ ...deleteForm, password: event.target.value })} required /></label><label className="field"><span>Type DELETE to confirm</span><input value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} required /></label><div className="profile-actions"><button className="button button-danger" disabled={deleting}>{deleting ? "Deleting..." : "Delete permanently"}</button><button className="button button-secondary" type="button" onClick={() => { setDeleteOpen(false); setDeleteError(""); }}>Cancel</button></div></form> : <button className="button button-danger-outline" onClick={() => { setDeleteOpen(true); setDeleteError(""); }}>Delete account</button>}{deleteError && <p className="form-error">{deleteError}</p>}</div></div></section>;
+}

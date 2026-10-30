@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 const imageData = "data:image/png;base64,aW1hZ2U=";
 const originalFetch = globalThis.fetch;
-const { createPredictionResult } = await import("../lib/prediction-result.js");
+const { createPredictionResult, createUnavailableModelResult } = await import("../lib/prediction-result.js");
 
 function mockResponse({ status = 200, body, contentType = "application/json" }) {
   return {
@@ -14,22 +14,32 @@ function mockResponse({ status = 200, body, contentType = "application/json" }) 
   };
 }
 
-test("prediction results accept valid labels for every supported crop", () => {
-  for (const [cropName, className] of [
-    ["Neem ", "Neem_Healthy"],
-    ["Kalanchoe", "Kalanchoe_Web_Blight"],
-    ["Tulsi", "Tulsi_Yellow_Spot"],
-  ]) {
-    const result = createPredictionResult(cropName, { className, confidence: 0.91 }, "colab");
-    assert.equal(result.disease, className.split("_").slice(1).join(" "));
+test("prediction results derive crop and condition for every supported class", async () => {
+  const { SUPPORTED_CLASS_LABELS } = await import("../lib/prediction-result.js");
+  assert.equal(SUPPORTED_CLASS_LABELS.length, 12);
+  for (const className of SUPPORTED_CLASS_LABELS) {
+    const result = createPredictionResult({ className, confidence: 0.91, gradcamDataUrl: "" }, "colab");
+    assert.equal(result.crop, className.split("_")[0]);
+    assert.equal(result.condition, className.split("_").slice(1).join(" "));
+    assert.equal(result.disease, result.condition);
+    assert.equal(result.className, className);
     assert.equal(result.confidence, 0.91);
     assert.equal(result.model.inferenceProvider, "colab");
+    assert.equal(result.explainability.status, "unavailable");
   }
 });
 
-test("prediction results reject wrong crops, malformed labels, and invalid confidence", () => {
+test("unavailable results keep invalid images distinct from service downtime", () => {
+  const invalid = createUnavailableModelResult("The uploaded image could not be decoded.", "invalid_image", "colab");
+  assert.equal(invalid.disease, null);
+  assert.equal(invalid.crop, null);
+  assert.equal(invalid.confidence, null);
+  assert.equal(invalid.model.status, "invalid_image");
+  assert.equal(invalid.explainability.status, "unavailable");
+});
+
+test("prediction results reject malformed labels and invalid confidence", () => {
   const invalidPredictions = [
-    { className: "Tulsi_Healthy", confidence: 0.91 },
     { className: "", confidence: 0.91 },
     { className: "Neem_Unknown", confidence: 0.91 },
     { className: "Neem_Healthy" },
@@ -41,11 +51,36 @@ test("prediction results reject wrong crops, malformed labels, and invalid confi
   ];
 
   for (const prediction of invalidPredictions) {
-    const result = createPredictionResult("Neem", prediction, "render");
+    const result = createPredictionResult(prediction, "render");
     assert.equal(result.disease, null);
     assert.equal(result.model.status, "prediction_unavailable");
     assert.equal(result.model.inferenceProvider, "render");
   }
+});
+
+test("automatic detection keeps a valid class from a different former selected crop", () => {
+  const result = createPredictionResult({ className: "Tulsi_Healthy", confidence: 0.99, gradcamDataUrl: "" }, "colab");
+  assert.equal(result.crop, "Tulsi");
+  assert.equal(result.condition, "Healthy");
+  assert.equal(result.healthy, true);
+});
+
+test("malformed heatmaps are rejected and not rendered", () => {
+  const result = createPredictionResult({
+    className: "Neem_Healthy",
+    confidence: 0.91,
+    gradcamDataUrl: "data:image/png;base64,ZmFrZQ=="
+  }, "colab");
+  assert.equal(result.explainability.status, "unavailable");
+  assert.equal(result.explainability.heatmap, undefined);
+});
+
+test("genuine Grad-CAM PNG data URLs are accepted", () => {
+  const heatmap = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+  const result = createPredictionResult({ className: "Neem_Spot", confidence: 0.88, gradcamDataUrl: heatmap }, "colab");
+  assert.equal(result.explainability.status, "available");
+  assert.equal(result.explainability.heatmap, heatmap);
+  assert.equal(result.healthy, false);
 });
 
 test("hosted inference parses valid JSON and sends the expected multipart request", async () => {
@@ -117,7 +152,33 @@ test("hosted inference preserves structured upstream HTTP errors", async () => {
 
   await assert.rejects(
     () => runHostedInference(imageData),
-    { message: "EfficientNet-B0 artifacts are unavailable." }
+    (error) => {
+      assert.equal(error.name, "HostedInferenceError");
+      assert.equal(error.status, 503);
+      assert.equal(error.code, "service_unavailable");
+      assert.equal(error.message, "EfficientNet-B0 artifacts are unavailable.");
+      return true;
+    }
+  );
+  globalThis.fetch = originalFetch;
+});
+
+test("hosted inference maps invalid-image HTTP 400 separately from downtime", async () => {
+  globalThis.fetch = async () => mockResponse({
+    status: 400,
+    body: JSON.stringify({ error: "The uploaded image could not be decoded." })
+  });
+  const { runHostedInference } = await import("../lib/hosted-inference.js");
+
+  await assert.rejects(
+    () => runHostedInference(imageData),
+    (error) => {
+      assert.equal(error.name, "HostedInferenceError");
+      assert.equal(error.status, 400);
+      assert.equal(error.code, "invalid_image");
+      assert.equal(error.message, "The uploaded image could not be decoded.");
+      return true;
+    }
   );
   globalThis.fetch = originalFetch;
 });
@@ -134,20 +195,25 @@ test("hosted inference surfaces request timeouts without fabricating output", as
   globalThis.fetch = originalFetch;
 });
 
-test("provider configuration keeps Render as the default and restricts providers", async () => {
+test("provider configuration keeps Colab as the default and restricts providers", async () => {
   const { getProviderConfig, isInferenceProvider } = await import("../lib/inference-providers.js");
+  process.env.COLAB_INFERENCE_URL = "https://colab.example/";
+  process.env.COLAB_INFERENCE_API_KEY = "colab-key";
   process.env.INFERENCE_SERVICE_URL = "https://render.example/";
   process.env.INFERENCE_SERVICE_API_KEY = "render-key";
-  delete process.env.COLAB_INFERENCE_URL;
   assert.equal(isInferenceProvider("render"), true);
   assert.equal(isInferenceProvider("colab"), true);
   assert.equal(isInferenceProvider("https://evil.example"), false);
   assert.deepEqual(getProviderConfig(), {
+    provider: "colab",
+    url: "https://colab.example",
+    apiKey: "colab-key"
+  });
+  assert.deepEqual(getProviderConfig("render"), {
     provider: "render",
     url: "https://render.example",
     apiKey: "render-key"
   });
-  assert.equal(getProviderConfig("colab").url, null);
 });
 
 test("hosted inference can route explicitly to Colab without changing Render config", async () => {
@@ -170,15 +236,28 @@ test("hosted inference can route explicitly to Colab without changing Render con
   globalThis.fetch = originalFetch;
 });
 
-test("Colab status distinguishes configuration, malformed responses, errors, and availability", async () => {
+test("Colab status uses /ready and requires a loaded model", async () => {
   const { checkColabAvailability } = await import("../lib/colab-status.js");
+  let requestedUrl;
   assert.equal(await checkColabAvailability(null, async () => {
     throw new Error("must not fetch");
   }), "unconfigured");
+  assert.equal(await checkColabAvailability({ url: "https://colab.example" }, async (url) => {
+    requestedUrl = url;
+    return {
+      ok: true,
+      text: async () => JSON.stringify({ status: "ready", modelReady: true })
+    };
+  }), "available");
+  assert.equal(requestedUrl, "https://colab.example/ready");
   assert.equal(await checkColabAvailability({ url: "https://colab.example" }, async () => ({
     ok: true,
-    text: async () => JSON.stringify({ status: "ok", modelReady: true })
-  })), "available");
+    text: async () => JSON.stringify({ status: "ok", modelReady: false })
+  })), "offline");
+  assert.equal(await checkColabAvailability({ url: "https://colab.example" }, async () => ({
+    ok: true,
+    text: async () => JSON.stringify({ status: "ready", modelReady: false })
+  })), "offline");
   assert.equal(await checkColabAvailability({ url: "https://expired.example" }, async () => ({
     ok: false,
     text: async () => JSON.stringify({ error: "expired tunnel" })
@@ -190,4 +269,24 @@ test("Colab status distinguishes configuration, malformed responses, errors, and
   assert.equal(await checkColabAvailability({ url: "https://timeout.example" }, async () => {
     throw Object.assign(new Error("timed out"), { name: "TimeoutError" });
   }), "offline");
+});
+
+test("hosted inference failures distinguish invalid images, timeouts, and service errors", async () => {
+  const { HostedInferenceError, classifyHostedInferenceFailure } = await import("../lib/inference-errors.js");
+  assert.equal(
+    classifyHostedInferenceFailure(new HostedInferenceError("bad image", { status: 400, code: "invalid_image" })).status,
+    "invalid_image"
+  );
+  assert.equal(
+    classifyHostedInferenceFailure(new HostedInferenceError("inference failed", { status: 502, code: "prediction_unavailable" })).status,
+    "prediction_unavailable"
+  );
+  assert.equal(
+    classifyHostedInferenceFailure(new HostedInferenceError("artifacts missing", { status: 503, code: "service_unavailable" })).status,
+    "service_unavailable"
+  );
+  assert.equal(
+    classifyHostedInferenceFailure(Object.assign(new Error("timed out"), { name: "TimeoutError" })).status,
+    "service_unavailable"
+  );
 });

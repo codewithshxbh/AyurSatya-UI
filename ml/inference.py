@@ -25,6 +25,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 DEFAULT_ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
 MAX_INFERENCE_IMAGE_SIZE = (2048, 2048)
 MAX_SOURCE_IMAGE_DIMENSION = 4096
+MAX_GRADCAM_EDGE = 512
 _MODEL_CACHE_KEY: str | None = None
 _MODEL_CACHE_VALUE: tuple[nn.Module, list[str], int] | None = None
 _MODEL_CACHE_LOCK = threading.Lock()
@@ -171,8 +172,10 @@ def run_inference(image_data: bytes | str, artifacts_dir: Path = DEFAULT_ARTIFAC
             overlay = Image.new("RGBA", image.size, (255, 48, 48, 0))
             overlay.putalpha(Image.fromarray(heatmap, mode="L"))
             blended = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+            if max(blended.size) > MAX_GRADCAM_EDGE:
+                blended.thumbnail((MAX_GRADCAM_EDGE, MAX_GRADCAM_EDGE), Image.Resampling.LANCZOS)
             output = io.BytesIO()
-            blended.save(output, format="PNG")
+            blended.save(output, format="PNG", optimize=True)
             return {
                 "className": labels[class_index],
                 "confidence": float(probabilities[0, class_index].item()),

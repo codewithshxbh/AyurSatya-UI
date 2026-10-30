@@ -1,0 +1,11 @@
+kalanchoe.jpg
+Source: Medicinal Plant Leaf Disease Dataset, class Kalanchoe_Healthy, file IMG_20250807_044135.jpg
+Derivative: resized JPEG of that same photograph for the overview crop card
+Species identity: Kalanchoe pinnata (PatharKuchi), as documented by the dataset authors
+Citation: Ahmmed, J., Kabir, M. A., ur Rehman, A., and Bermak, A. (2025). Medicinal Plant Leaf Disease Dataset. Mendeley Data, V1. https://doi.org/10.17632/ncg7kk3gwx.1
+Licence: CC BY 4.0
+This file replaces a previous overview thumbnail that depicted a Ficus-like plant, not Kalanchoe.
+
+classes/*.jpg
+Source: one resized JPEG from each of the 12 dataset class folders, used only as overview class cards.
+Licence: CC BY 4.0, same citation as above.

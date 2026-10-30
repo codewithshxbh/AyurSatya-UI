@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import {
   ChevronDown,
   Menu,
@@ -353,7 +354,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
           <span key={item.className} className="class-pill" style={{ "--pill-delay": `${index * 0.35}s` }}>
             <span className="class-pill-glow" aria-hidden="true" />
             <span className="class-pill-inner">
-              <img className="class-pill-photo" src={item.image} alt="" title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} loading="eager" decoding="async" />
+              <Image className="class-pill-photo" src={item.image} alt="" title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} width={36} height={36} />
               <span className="class-pill-copy">
                 <strong>{item.crop}</strong>
                 <small>{item.condition}</small>
@@ -408,7 +409,11 @@ function AnalysisRow({ item, onOpen }) {
   return (
     <button className="analysis-card" type="button" onClick={onOpen} aria-label={`Open ${item.crop} analysis from ${item.date}`}>
       <div className={`analysis-card-media ${item.color}`}>
-        {item.imageUrls?.[0] ? <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : <span>No image</span>}
+        {item.imageUrls?.[0] ? (
+          // History thumbs are Cloudinary or other stored URLs, not static public paths.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} />
+        ) : <span>No image</span>}
       </div>
       <div className="analysis-card-body">
         <strong>{item.crop}</strong>
@@ -547,7 +552,11 @@ function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, 
             <div className="upload-grid">
               <div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}>
                 <input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} />
-                <label htmlFor="image-upload">{preview ? <img src={preview} alt="Selected leaf preview" /> : <><strong>Upload leaf image</strong><span>The model will detect Neem, Tulsi, or Kalanchoe from the image</span><small>JPG or PNG, up to 10 MB</small></>}</label>
+                <label htmlFor="image-upload">{preview ? (
+                  // File-picker preview uses a blob: object URL that next/image cannot load.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preview} alt="Selected leaf preview" />
+                ) : <><strong>Upload leaf image</strong><span>The model will detect Neem, Tulsi, or Kalanchoe from the image</span><small>JPG or PNG, up to 10 MB</small></>}</label>
               </div>
               <div className="upload-controls">
                 <FilterSelect
@@ -690,7 +699,15 @@ function AssessmentReport({ result, preview, imageFallback }) {
   return <div className="assessment-stack">
     <div className="report-grid">
       <div className="panel report-image">
-        {preview ? <img src={preview} alt="Analyzed leaf" /> : imageFallback?.imageUrls?.length ? imageFallback.imageUrls.map((url, index) => <img key={`${url}-${index}`} src={url} alt={`${visual.crop || "Leaf"} image ${index + 1}`} onError={(event) => { event.currentTarget.remove(); }} />) : <div className="history-image-fallback sage"><span>No stored image</span></div>}
+        {preview ? (
+          // Report leaf may be a blob: preview or a stored remote URL.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={preview} alt="Analyzed leaf" />
+        ) : imageFallback?.imageUrls?.length ? imageFallback.imageUrls.map((url, index) => (
+          // Stored report images are Cloudinary or other remote URLs.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={`${url}-${index}`} src={url} alt={`${visual.crop || "Leaf"} image ${index + 1}`} onError={(event) => { event.currentTarget.remove(); }} />
+        )) : <div className="history-image-fallback sage"><span>No stored image</span></div>}
         <div><p className="overline">UPLOADED LEAF</p><h2>{detectedTitle}</h2><p>{visual.summary || "The uploaded image has not received a model prediction."}</p></div>
       </div>
       <div className="panel result-card">
@@ -704,7 +721,13 @@ function AssessmentReport({ result, preview, imageFallback }) {
     </div>
     <section className="panel report-section report-section-wide">
       <div className="section-heading"><h2>Grad-CAM explainability</h2><span className="badge">{heatmap ? "Available" : "Not available"}</span></div>
-      {heatmap ? <div className="gradcam-pair">{preview ? <div className="gradcam-frame"><img src={preview} alt="Original leaf" /></div> : null}<div className="gradcam-frame"><img src={heatmap} alt="Grad-CAM overlay for the predicted class" /></div></div> : <p>No heatmap is shown because Grad-CAM was not returned for this inference.</p>}
+      {heatmap ? <div className="gradcam-pair">{preview ? <div className="gradcam-frame">{/* Original leaf may be a blob: upload preview. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview} alt="Original leaf" />
+        </div> : null}<div className="gradcam-frame">{/* Grad-CAM overlays are data:image heatmaps; next/image cannot load them. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={heatmap} alt="Grad-CAM overlay for the predicted class" />
+        </div></div> : <p>No heatmap is shown because Grad-CAM was not returned for this inference.</p>}
       <p>{heatmap ? "The overlay marks image regions that influenced the predicted class. It does not prove a causal diagnosis." : visual.explainability?.message}</p>
     </section>
     <div className="report-sections">
@@ -951,7 +974,11 @@ function FilterSelect({ label, value, placeholder, options, onChange, ariaLabel,
 
 function Avatar({ user, name, size = "large" }) {
   return user?.avatar_url
-    ? <img className={`user-avatar user-avatar-${size}`} src={user.avatar_url} alt={`${name} profile`} />
+    ? (
+      // Avatars are remote Cloudinary URLs, not static public paths.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img className={`user-avatar user-avatar-${size}`} src={user.avatar_url} alt={`${name} profile`} />
+    )
     : <div className={`avatar-fallback avatar-fallback-${size}`}>{name.slice(0, 2).toUpperCase()}</div>;
 }
 

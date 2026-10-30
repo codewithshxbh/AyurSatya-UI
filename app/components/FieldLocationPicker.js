@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -88,6 +88,29 @@ export default function FieldLocationPicker({
     };
   }, []);
 
+  const bindMarker = useCallback((marker) => {
+    marker.on("dragend", () => {
+      const lngLat = marker.getLngLat();
+      applyDraftRef.current?.(createPointSelection({
+        latitude: lngLat.lat,
+        longitude: lngLat.lng,
+        source: FIELD_LOCATION_SOURCE.MAP
+      }), false);
+    });
+  }, []);
+
+  const placeMarker = useCallback((lat, lon, fly) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!markerRef.current) {
+      markerRef.current = new maplibregl.Marker({ color: "#1c73b3", draggable: true }).setLngLat([lon, lat]).addTo(map);
+      bindMarker(markerRef.current);
+    } else {
+      markerRef.current.setLngLat([lon, lat]);
+    }
+    if (fly) map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 15), essential: true });
+  }, [bindMarker]);
+
   useEffect(() => {
     if (!config || !mapNode.current || mapRef.current) return undefined;
     let cancelled = false;
@@ -154,7 +177,7 @@ export default function FieldLocationPicker({
       map.remove();
       mapRef.current = null;
     };
-  }, [config]);
+  }, [config, placeMarker]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -165,29 +188,6 @@ export default function FieldLocationPicker({
   useEffect(() => () => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
   }, []);
-
-  function bindMarker(marker) {
-    marker.on("dragend", () => {
-      const lngLat = marker.getLngLat();
-      applyDraftRef.current?.(createPointSelection({
-        latitude: lngLat.lat,
-        longitude: lngLat.lng,
-        source: FIELD_LOCATION_SOURCE.MAP
-      }), false);
-    });
-  }
-
-  function placeMarker(lat, lon, fly) {
-    const map = mapRef.current;
-    if (!map) return;
-    if (!markerRef.current) {
-      markerRef.current = new maplibregl.Marker({ color: "#1c73b3", draggable: true }).setLngLat([lon, lat]).addTo(map);
-      bindMarker(markerRef.current);
-    } else {
-      markerRef.current.setLngLat([lon, lat]);
-    }
-    if (fly) map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 15), essential: true });
-  }
 
   function applyDraft(next, fly) {
     setDraft(next);

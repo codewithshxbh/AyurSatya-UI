@@ -573,3 +573,47 @@
   .field-location-actions,.field-location-locate{width:100%}
   .field-location-actions .button,.field-location-locate{width:100%}
 }
+html,body,.app-shell,.main,.page,.history-detail{overflow-anchor:none}
+.review-theme .skeleton{background:#dceaf4}
+.review-theme .skeleton:after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.78),transparent)}
+.review-theme .sidebar .skeleton{background:rgba(255,255,255,.18)}
+.review-theme .sidebar .skeleton:after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),transparent)}
+.skeleton-fill{display:block;width:100%;height:100%;border-radius:inherit}
+.skeleton-line{display:block;height:10px;width:100%;max-width:100%;border-radius:6px}
+.skeleton-line-xs{width:38%;height:8px}
+.skeleton-line-sm{width:54%;height:9px}
+.skeleton-line-md{width:72%;height:12px}
+.skeleton-line-lg{width:42%;height:30px;margin:6px 0}
+.skeleton-line-title{width:48%;height:18px}
+.skeleton-badge{width:88px;height:22px;border-radius:999px;flex:none}
+.skeleton-search{width:240px;height:38px;border-radius:7px}
+.skeleton-filter{width:100%;max-width:220px;height:38px;border-radius:8px}
+.skeleton-run{width:100%;max-width:none;height:42px;border-radius:8px}
+.skeleton-avatar{width:32px;height:32px;border-radius:50%;flex:none}
+.skeleton-profile-photo{width:84px;height:84px;border-radius:50%;flex:none}
+.skeleton-report-image{display:block;width:100%;height:260px;border-radius:0}
+.crop-image,.analysis-card-media,.dropzone,.gradcam-frame{position:relative}
+.crop-card-meta .skeleton-line + .skeleton-line,.analysis-card-body .skeleton-line + .skeleton-line,.knowledge-card-body .skeleton-line + .skeleton-line,.report-section-body .skeleton-line + .skeleton-line,.profile-details .skeleton-line + .skeleton-line,.section-title > div .skeleton-line + .skeleton-line,.process-heading .skeleton-line + .skeleton-line,.knowledge-intro .skeleton-line + .skeleton-line,.note-banner > div .skeleton-line + .skeleton-line,.settings-card .skeleton-line + .skeleton-line,.settings-card-heading .skeleton-line + .skeleton-line{margin-top:8px}
+.section-title > div .skeleton-line-title,.process-heading .skeleton-line-title{margin-bottom:2px}
+.knowledge-card .overline .skeleton-line,.knowledge-card h2 .skeleton-line{display:inline-block}
+.knowledge-filters .field .skeleton-filter{margin-top:6px}
+.upload-controls .skeleton-line-xs{margin-bottom:-8px}
+.sidebar-account-copy{display:grid;gap:6px;flex:1;min-width:0}
+@media(max-width:680px){
+  .skeleton-heading{width:82%;height:35px}
+  .skeleton-report-image{height:210px}
+  .skeleton-search{width:100%}
+}
+.class-pill-row{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.class-pill{position:relative;display:inline-flex;isolation:isolate;padding:1.5px;border-radius:999px;overflow:hidden;flex:none;pointer-events:none;user-select:none;box-shadow:0 8px 18px rgba(30,90,140,.08)}
+.class-pill-glow{position:absolute;inset:-140%;background:conic-gradient(from 0deg,#2b8fd4,#67e8f9,#8b5cf6,#f0abfc,#fbbf24,#34d399,#38bdf8,#2b8fd4);animation:class-pill-spin 4.5s linear infinite;animation-delay:var(--pill-delay,0s);z-index:0}
+.class-pill-inner{position:relative;z-index:1;display:inline-flex;align-items:center;gap:8px;padding:4px 12px 4px 4px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(232,243,251,.9));backdrop-filter:blur(10px)}
+.class-pill-photo{width:36px;height:36px;border-radius:50%;object-fit:cover;flex:none;background:#dceaf4;display:block}
+.class-pill-copy{display:grid;gap:1px;min-width:0;padding-right:4px}
+.class-pill-copy strong{font:600 12px/1.2 "DM Sans",sans-serif;color:#1e3d52}
+.class-pill-copy small{font:600 10px/1.2 "DM Sans",sans-serif;color:#1c73b3}
+.class-pill-copy em{font:400 9px/1.2 "DM Sans",sans-serif;color:#6a7f90;font-style:normal}
+.class-pill-loading{min-width:168px}
+.class-pill-loading .class-pill-copy{gap:6px;width:96px}
+@keyframes class-pill-spin{to{transform:rotate(1turn)}}
+@media(prefers-reduced-motion:reduce){.class-pill-glow{animation:none;background:linear-gradient(135deg,#2b8fd4,#67e8f9,#8b5cf6)}}

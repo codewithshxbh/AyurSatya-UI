@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ChevronDown,
@@ -11,11 +11,56 @@ import {
 import { combineKnowledgeText, parseLabeledInformation } from "../lib/knowledge-filters.mjs";
 import { analyzeSatelliteCoordinates } from "../lib/field-location";
 import { displayClassLabel, humanizeUserText, parsePredictedClass, SUPPORTED_CLASS_LABELS } from "../lib/prediction-result";
+import {
+  AnalysisCardSkeleton,
+  AnalysisSkeleton,
+  HistoryListSkeleton,
+  KnowledgeCardSkeleton,
+  KnowledgeSkeleton,
+  OverviewSkeleton,
+  ProfileSkeleton,
+  ReportSkeleton
+} from "./workspace-loading";
 
 const FieldLocationPicker = dynamic(() => import("./components/FieldLocationPicker"), {
   ssr: false,
   loading: () => <p className="field-location-map-status">Loading map...</p>
 });
+
+const MIN_SKELETON_MS = 320;
+
+function scrollWorkspaceToTop() {
+  if (typeof window === "undefined") return;
+  if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+  const run = () => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    const main = document.querySelector("main.main");
+    if (main) main.scrollTop = 0;
+  };
+  run();
+  requestAnimationFrame(() => {
+    run();
+    requestAnimationFrame(run);
+  });
+  window.setTimeout(run, 50);
+}
+
+function waitAtLeast(startedAt, minimumMs = MIN_SKELETON_MS) {
+  const remaining = minimumMs - (Date.now() - startedAt);
+  return remaining > 0 ? new Promise((resolve) => setTimeout(resolve, remaining)) : Promise.resolve();
+}
+
+function useReveal(minimumMs = MIN_SKELETON_MS) {
+  const [ready, setReady] = useState(false);
+  useLayoutEffect(() => {
+    scrollWorkspaceToTop();
+    const timer = setTimeout(() => setReady(true), minimumMs);
+    return () => clearTimeout(timer);
+  }, [minimumMs]);
+  return ready;
+}
 
 const crops = [
   { name: "Neem", scientific: "Azadirachta indica", color: "forest", image: "/crops/neem.jpg" },
@@ -36,10 +81,10 @@ const supportedClasses = SUPPORTED_CLASS_LABELS.map((className) => {
   };
 });
 
-export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
-  const [session, setSession] = useState(null);
+export default function Home({ initialUser = null, initialHighlight = null, knowledgeCount = 0 }) {
+  const [session, setSession] = useState(initialUser ? { user: initialUser } : null);
   const [authMode, setAuthMode] = useState("login");
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [activeView, setActiveView] = useState("overview");
@@ -54,11 +99,29 @@ export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
   const [knowledgeRecordCount, setKnowledgeRecordCount] = useState(knowledgeCount);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
+  function changeView(view) {
+    setMobileOpen(false);
+    setActiveView(view);
+  }
+
+  useLayoutEffect(() => {
+    scrollWorkspaceToTop();
+  }, [activeView, selectedHistoryItem?.id]);
+
   useEffect(() => {
-    fetch("/api/auth/me").then((response) => response.json()).then(({ user }) => {
-      setSession(user ? { user } : null);
-      setAuthLoading(false);
-    }).catch(() => setAuthLoading(false));
+    if (initialUser) return undefined;
+    let cancelled = false;
+    fetch("/api/auth/me", { cache: "no-store" }).then((response) => response.json()).then(({ user }) => {
+      if (cancelled || !user) return;
+      setSession({ user });
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [initialUser]);
+
+  useEffect(() => {
+    if (session) return;
     if (initialHighlight || knowledgeCount > 0) return;
     fetch("/api/public/highlight", { cache: "no-store" }).then((response) => response.json()).then((payload) => {
       setLoginHighlight(payload.highlight || initialHighlight || null);
@@ -66,30 +129,37 @@ export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
     }).catch(() => {
       setLoginHighlight(initialHighlight || null);
     });
-  }, [initialHighlight, knowledgeCount]);
+  }, [session, initialHighlight, knowledgeCount]);
 
   async function handleAuth(event) {
     event.preventDefault();
     setAuthLoading(true);
     setAuthError("");
-    const form = new FormData(event.currentTarget);
-    const email = form.get("email");
-    const password = form.get("password");
-    const fullName = form.get("fullName");
-    const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, fullName }) });
-    const result = await response.json();
-    if (!response.ok) {
-      setAuthError(result.error || "Authentication failed.");
-    } else if (authMode === "signup") {
-      setAuthEmail(email);
+    try {
+      const form = new FormData(event.currentTarget);
+      const email = form.get("email");
+      const password = form.get("password");
+      const fullName = form.get("fullName");
+      const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, fullName }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAuthError(result.error || "Authentication failed.");
+        return;
+      }
+      if (!result.user?.id) {
+        setAuthError("Sign-in succeeded, but the session could not be created. Try again.");
+        return;
+      }
+      setAuthEmail(typeof email === "string" ? email : "");
       setSession({ user: result.user });
       setActiveView("overview");
-    } else {
-      setSession({ user: result.user });
-      setActiveView("overview");
+    } catch (error) {
+      console.error("Authentication failed", error);
+      setAuthError("Sign-in could not be completed. Check your connection and try again.");
+    } finally {
+      setAuthLoading(false);
     }
-    setAuthLoading(false);
   }
 
   async function signOut() {
@@ -153,7 +223,7 @@ export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
             <p className="auth-description">{authMode === "login" ? "Access your analyses, crop notes, and saved insights." : "Save your crop analyses and keep your research in one place."}</p>
             <form onSubmit={handleAuth} className="auth-form">
               {authMode === "signup" && <Field label="Full name" name="fullName" placeholder="Your name" />}
-              <Field label="Email address" name="email" type="email" placeholder="you@example.com" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} />
+              <Field label="Email address" name="email" type="email" placeholder="you@example.com" defaultValue={authEmail} />
               <Field label="Password" name="password" type="password" placeholder="At least 6 characters" />
               <button className="button button-primary auth-submit" disabled={authLoading}>{authLoading ? "Please wait..." : authMode === "login" ? "Sign in" : "Create account"}</button>
               {authError && <p className="form-error">{authError}</p>}
@@ -174,20 +244,20 @@ export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
         <div className="sidebar-top"><span className="wordmark">Ayur<span>Satya</span></span><button className="sidebar-close" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
         <p className="nav-label">WORKSPACE</p>
         <nav className="nav-list">
-          <NavButton label="Overview" active={activeView === "overview"} onClick={() => setActiveView("overview")} />
-          <NavButton label="Analysis" active={activeView === "analysis"} onClick={() => setActiveView("analysis")} />
-          <NavButton label="Analysis history" active={activeView === "history"} onClick={() => { setSelectedHistoryItem(null); setActiveView("history"); }} />
-          <NavButton label="Knowledge base" active={activeView === "knowledge"} onClick={() => setActiveView("knowledge")} />
+          <NavButton label="Overview" active={activeView === "overview"} onClick={() => changeView("overview")} />
+          <NavButton label="Analysis" active={activeView === "analysis"} onClick={() => changeView("analysis")} />
+          <NavButton label="Analysis history" active={activeView === "history"} onClick={() => { setSelectedHistoryItem(null); changeView("history"); }} />
+          <NavButton label="Knowledge base" active={activeView === "knowledge"} onClick={() => changeView("knowledge")} />
         </nav>
         <div className="sidebar-bottom">
-          <NavButton label="Profile & settings" active={activeView === "profile"} onClick={() => setActiveView("profile")} />
+          <NavButton label="Profile & settings" active={activeView === "profile"} onClick={() => changeView("profile")} />
           <button className="nav-button" onClick={signOut}>Sign out</button>
           <div className="sidebar-account"><Avatar user={session.user} name={name} size="small" /><div><strong>{name}</strong><span>{session.user.email}</span></div></div>
         </div>
       </aside>
       <main className="main">
         <button className="mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={22} strokeWidth={2} /></button>
-        {activeView === "overview" && <Overview firstName={firstName} setActiveView={setActiveView} onOpenHistoryItem={(item) => { setSelectedHistoryItem(item); setActiveView("history"); }} />}
+        {activeView === "overview" && <Overview firstName={firstName} setActiveView={changeView} onOpenHistoryItem={(item) => { scrollWorkspaceToTop(); setSelectedHistoryItem(item); changeView("history"); }} />}
         {activeView === "analysis" && <Analysis file={file} preview={preview} chooseFile={chooseFile} uploadMessage={uploadMessage} setUploadMessage={setUploadMessage} analysisResult={analysisResult} setAnalysisResult={setAnalysisResult} analysisLoading={analysisLoading} setAnalysisLoading={setAnalysisLoading} storageStatus={storageStatus} setStorageStatus={setStorageStatus} />}
         {activeView === "history" && <HistoryView userId={session.user.id} initialSelectedItem={selectedHistoryItem} onClearSelectedItem={() => setSelectedHistoryItem(null)} />}
         {activeView === "knowledge" && <Knowledge />}
@@ -197,8 +267,8 @@ export default function Home({ initialHighlight = null, knowledgeCount = 0 }) {
   );
 }
 
-function Field({ label, name, type = "text", placeholder, value, onChange }) {
-  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} value={value} onChange={onChange} required minLength={type === "password" ? 6 : undefined} /></label>;
+function Field({ label, name, type = "text", placeholder, value, defaultValue, onChange }) {
+  return <label className="field"><span>{label}</span><input name={name} type={type} placeholder={placeholder} value={value} defaultValue={defaultValue} onChange={onChange} required minLength={type === "password" ? 6 : undefined} /></label>;
 }
 
 function NavButton({ label, active, onClick }) {
@@ -226,6 +296,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const loadOverview = useCallback(async () => {
+    const startedAt = Date.now();
     setHistoryLoading(true);
     setHistoryError("");
     try {
@@ -239,6 +310,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
       console.error("Overview analysis lookup failed", error);
       setHistoryError("Analysis activity is temporarily unavailable.");
     } finally {
+      await waitAtLeast(startedAt);
       setHistoryLoading(false);
     }
   }, []);
@@ -254,6 +326,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
   }).format(now).toUpperCase();
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  if (historyLoading) return <OverviewSkeleton />;
   return (
     <section className="page">
       <div className="page-heading">
@@ -265,8 +338,8 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
         <button className="button button-primary" onClick={() => setActiveView("analysis")}>New analysis</button>
       </div>
       <div className="stats">
-        <Stat label="Total analyses" value={historyLoading ? "—" : totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} />
-        <Stat label="Validated results" value={historyLoading ? "—" : validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} />
+        <Stat label="Total analyses" value={totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} />
+        <Stat label="Validated results" value={validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} />
         <Stat label="Supported classes" value={supportedClasses.length} detail="12 labels from the local dataset" />
       </div>
       <div className="section-title">
@@ -274,20 +347,20 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
           <h2>Supported classes</h2>
           <p>Automatic identification currently supports 12 classes across Neem, Tulsi, and Kalanchoe (PatharKuchi, Kalanchoe pinnata).</p>
         </div>
-        <button className="link-button" onClick={() => setActiveView("analysis")}>New analysis</button>
       </div>
-      <div className="crop-grid">
-        {supportedClasses.map((item) => (
-          <button key={item.className} className="crop-card" type="button" onClick={() => setActiveView("analysis")}>
-            <div className={`crop-image ${item.color}`}>
-              <img src={item.image} alt={`${item.crop} ${item.condition} leaf from the Medicinal Plant Leaf Disease Dataset, CC BY 4.0`} title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} loading="eager" decoding="async" />
-            </div>
-            <div className="crop-card-meta">
-              <strong>{item.crop}</strong>
-              <small>{item.condition}</small>
-              <span>{item.scientific}</span>
-            </div>
-          </button>
+      <div className="class-pill-row" aria-label="Supported classes">
+        {supportedClasses.map((item, index) => (
+          <span key={item.className} className="class-pill" style={{ "--pill-delay": `${index * 0.35}s` }}>
+            <span className="class-pill-glow" aria-hidden="true" />
+            <span className="class-pill-inner">
+              <img className="class-pill-photo" src={item.image} alt="" title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} loading="eager" decoding="async" />
+              <span className="class-pill-copy">
+                <strong>{item.crop}</strong>
+                <small>{item.condition}</small>
+                <em>{item.scientific}</em>
+              </span>
+            </span>
+          </span>
         ))}
       </div>
       <div className="section-title">
@@ -297,9 +370,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
         </div>
         <button className="link-button" onClick={() => setActiveView("history")}>See history</button>
       </div>
-      {historyLoading ? (
-        <div className="history-card-grid">{[1, 2, 3].map((item) => <div className="skeleton skeleton-crop" key={item} />)}</div>
-      ) : historyError ? (
+      {historyError ? (
         <div className="panel empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div>
       ) : analyses.length ? (
         <div className="history-card-grid">
@@ -350,7 +421,16 @@ function AnalysisRow({ item, onOpen }) {
 }
 
 function HistoryDetail({ item, onBack, loading }) {
-  return <div className="history-detail"><div className="history-detail-actions"><button className="button button-secondary" type="button" onClick={onBack}>Back to history</button><span className="status review">{loading ? "Loading report..." : "Saved analysis"}</span></div><AssessmentReport result={item.result || {}} preview={item.imageUrls?.[0] || ""} imageFallback={item} /></div>;
+  if (loading) return <ReportSkeleton onBack={onBack} />;
+  return (
+    <div className="history-detail">
+      <div className="history-detail-actions">
+        <button className="button button-secondary" type="button" onClick={onBack}>Back to history</button>
+        <span className="status review">Saved analysis</span>
+      </div>
+      <AssessmentReport result={item.result || {}} preview={item.imageUrls?.[0] || ""} imageFallback={item} />
+    </div>
+  );
 }
 
 function getAnalysisImageUrls(item) {
@@ -371,6 +451,7 @@ function getAnalysisImageUrls(item) {
 }
 
 function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, storageStatus, setStorageStatus }) {
+  const ready = useReveal();
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [locationConfirmed, setLocationConfirmed] = useState(false);
@@ -445,6 +526,10 @@ function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, 
       setAnalysisLoading(false);
     }
   }
+  useLayoutEffect(() => {
+    if (analysisResult) scrollWorkspaceToTop();
+  }, [analysisResult]);
+  if (!ready) return <AnalysisSkeleton />;
   return (
     <section className="page">
       <div className="page-heading compact-heading">
@@ -589,6 +674,9 @@ function LabeledKnowledge({ record, fallback, extraFields }) {
 }
 
 function AssessmentReport({ result, preview, imageFallback }) {
+  useLayoutEffect(() => {
+    scrollWorkspaceToTop();
+  }, []);
   const visual = result.visual || {};
   const knowledge = result.knowledge || {};
   const plantProfile = knowledge.plantProfile || {};
@@ -682,25 +770,32 @@ function Metric({ label, value }) {
 function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(initialSelectedItem);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(Boolean(initialSelectedItem?.id));
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState("30");
   useEffect(() => {
     setSelectedItem(initialSelectedItem);
+    if (initialSelectedItem?.id) setDetailLoading(true);
   }, [initialSelectedItem]);
+  useLayoutEffect(() => {
+    scrollWorkspaceToTop();
+  }, [selectedItem?.id, detailLoading]);
   useEffect(() => {
     const id = selectedItem?.id;
     if (!id) return undefined;
     let cancelled = false;
+    const startedAt = Date.now();
     setDetailLoading(true);
     fetch(`/api/analyses/${id}`, { cache: "no-store" })
       .then((response) => response.json().then((payload) => ({ ok: response.ok, payload })))
-      .then(({ ok, payload }) => {
+      .then(async ({ ok, payload }) => {
+        await waitAtLeast(startedAt);
         if (cancelled || !ok || !payload.analysis) return;
         setSelectedItem(toHistoryItem(payload.analysis));
       })
-      .finally(() => {
+      .finally(async () => {
+        await waitAtLeast(startedAt);
         if (!cancelled) setDetailLoading(false);
       });
     return () => {
@@ -708,9 +803,14 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
     };
   }, [selectedItem?.id]);
   useEffect(() => {
-    fetch("/api/analyses", { cache: "no-store" }).then((response) => response.json()).then(({ analyses }) => {
+    const startedAt = Date.now();
+    fetch("/api/analyses", { cache: "no-store" }).then((response) => response.json()).then(async ({ analyses }) => {
+      await waitAtLeast(startedAt);
       if (analyses?.length) setItems(analyses.map(toHistoryItem));
-    }).finally(() => setLoading(false));
+    }).finally(async () => {
+      await waitAtLeast(startedAt);
+      setLoading(false);
+    });
   }, [userId]);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const cutoff = dateRange === "all" ? 0 : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000;
@@ -719,17 +819,20 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
     const matchesDate = dateRange === "all" || new Date(item.createdAt).getTime() >= cutoff;
     return matchesSearch && matchesDate;
   });
+  if (!selectedItem && loading) return <HistoryListSkeleton />;
   return (
     <section className="page">
-      <div className="page-heading compact-heading">
-        <div>
-          <p className="overline">YOUR WORKSPACE</p>
-          <h1>Analysis history.</h1>
-          <p className="lead">Review previous results and keep your research connected.</p>
+      {!selectedItem && (
+        <div className="page-heading compact-heading">
+          <div>
+            <p className="overline">YOUR WORKSPACE</p>
+            <h1>Analysis history.</h1>
+            <p className="lead">Review previous results and keep your research connected.</p>
+          </div>
         </div>
-      </div>
+      )}
       {selectedItem ? (
-        <HistoryDetail item={selectedItem} loading={detailLoading} onBack={() => { setSelectedItem(null); onClearSelectedItem(); }} />
+        <HistoryDetail key={selectedItem.id} item={selectedItem} loading={detailLoading} onBack={() => { scrollWorkspaceToTop(); setSelectedItem(null); onClearSelectedItem(); }} />
       ) : (
         <div className="history-workspace">
           <div className="panel history-panel">
@@ -739,9 +842,9 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
             </div>
           </div>
           {loading ? (
-            <div className="history-card-grid">{[1, 2, 3, 4, 5, 6].map((item) => <div className="skeleton skeleton-crop" key={item} />)}</div>
+            <div className="history-card-grid">{[1, 2, 3, 4, 5, 6].map((item) => <AnalysisCardSkeleton key={item} />)}</div>
           ) : filteredItems.length ? (
-            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => setSelectedItem(item)} />)}</div>
+            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => { scrollWorkspaceToTop(); setDetailLoading(true); setSelectedItem(item); }} />)}</div>
           ) : (
             <div className="panel empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>
           )}
@@ -764,6 +867,7 @@ function Knowledge() {
   const [diseaseFilter, setDiseaseFilter] = useState("");
   const [recordTypeFilter, setRecordTypeFilter] = useState("");
   const loadKnowledge = useCallback(async () => {
+    const startedAt = Date.now();
     setLoading(true);
     setError("");
     const params = new URLSearchParams();
@@ -778,12 +882,14 @@ function Knowledge() {
     } catch (requestError) {
       setError(requestError.message);
     } finally {
+      await waitAtLeast(startedAt);
       setLoading(false);
     }
   }, [cropFilter, diseaseFilter, recordTypeFilter]);
   useEffect(() => {
     loadKnowledge();
   }, [loadKnowledge]);
+  if (loading && records.length === 0 && !error) return <KnowledgeSkeleton />;
   return (
     <section className="page">
       <div className="page-heading compact-heading">
@@ -806,7 +912,7 @@ function Knowledge() {
         <FilterSelect label="Record type" value={recordTypeFilter} placeholder="All types" options={[{ value: "general_crop", label: "General crop" }, { value: "botanical", label: "Botanical" }, { value: "traditional_reference", label: "Traditional reference" }, { value: "disease_context", label: "Disease context" }]} onChange={setRecordTypeFilter} />
       </div>
       {loading ? (
-        <div className="knowledge-grid"><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /><div className="skeleton skeleton-crop" /></div>
+        <div className="knowledge-grid"><KnowledgeCardSkeleton /><KnowledgeCardSkeleton /><KnowledgeCardSkeleton /><KnowledgeCardSkeleton /><KnowledgeCardSkeleton /><KnowledgeCardSkeleton /></div>
       ) : error ? (
         <div className="panel empty-state"><strong>Knowledge base unavailable</strong><span>{error}</span><button className="button button-secondary" onClick={loadKnowledge}>Retry</button></div>
       ) : records.length ? (
@@ -850,6 +956,7 @@ function Avatar({ user, name, size = "large" }) {
 }
 
 function Profile({ user, name, email, onProfileUpdated }) {
+  const ready = useReveal();
   const [editing, setEditing] = useState(false);
   const [fullName, setFullName] = useState(name);
   const [saving, setSaving] = useState(false);
@@ -967,5 +1074,6 @@ function Profile({ user, name, email, onProfileUpdated }) {
     }
   }
 
+  if (!ready) return <ProfileSkeleton />;
   return <section className="page"><div className="page-heading compact-heading"><div><p className="overline">ACCOUNT</p><h1>Profile & settings.</h1><p className="lead">Manage your identity and account security.</p></div></div><div className="settings-grid"><div className="panel profile-panel settings-span"><div className="profile-photo-column"><Avatar user={user} name={name} /><label className="button button-secondary avatar-upload">{avatarBusy ? "Saving..." : "Upload photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadAvatar} disabled={avatarBusy} /></label>{user.avatar_url && <button className="avatar-remove" type="button" onClick={removeAvatar} disabled={avatarBusy}>Remove photo</button>}{avatarError && <p className="form-error">{avatarError}</p>}</div><div className="profile-details"><p className="overline">SIGNED IN AS</p><h2>{name}</h2><p>{email}</p>{editing ? <form className="profile-edit-form" onSubmit={saveProfile}><label className="field"><span>Display name</span><input value={fullName} onChange={(event) => setFullName(event.target.value)} minLength={2} maxLength={80} required autoFocus /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button><button className="button button-secondary" type="button" onClick={() => { setEditing(false); setFullName(name); setError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setEditing(true); setMessage(""); setError(""); }}>Edit profile</button>}{message && <p className="form-success">{message}</p>}{error && <p className="form-error">{error}</p>}</div></div><div className="panel settings-card"><div className="settings-card-heading"><div><p className="overline">SECURITY</p><h2>Password</h2></div></div><p>Change your password without exposing it to the browser or database logs.</p>{passwordOpen ? <form className="settings-form" onSubmit={changePassword}><label className="field"><span>Current password</span><input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required /></label><label className="field"><span>New password</span><input type="password" minLength={8} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required /></label><label className="field"><span>Confirm new password</span><input type="password" minLength={8} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required /></label><div className="profile-actions"><button className="button button-primary" disabled={saving}>{saving ? "Updating..." : "Update password"}</button><button className="button button-secondary" type="button" onClick={() => { setPasswordOpen(false); setPasswordError(""); }}>Cancel</button></div></form> : <button className="button button-secondary" onClick={() => { setPasswordOpen(true); setPasswordMessage(""); setPasswordError(""); }}>Change password</button>}{passwordMessage && <p className="form-success">{passwordMessage}</p>}{passwordError && <p className="form-error">{passwordError}</p>}</div><div className="panel settings-card danger-card"><div className="settings-card-heading"><div><p className="overline">DANGER ZONE</p><h2>Delete account</h2></div></div><p>Remove your account, saved analyses, and active sessions permanently.</p>{deleteOpen ? <form className="settings-form" onSubmit={deleteAccount}><label className="field"><span>Current password</span><input type="password" value={deleteForm.password} onChange={(event) => setDeleteForm({ ...deleteForm, password: event.target.value })} required /></label><label className="field"><span>Type DELETE to confirm</span><input value={deleteForm.confirmation} onChange={(event) => setDeleteForm({ ...deleteForm, confirmation: event.target.value })} required /></label><div className="profile-actions"><button className="button button-danger" disabled={deleting}>{deleting ? "Deleting..." : "Delete permanently"}</button><button className="button button-secondary" type="button" onClick={() => { setDeleteOpen(false); setDeleteError(""); }}>Cancel</button></div></form> : <button className="button button-danger-outline" onClick={() => { setDeleteOpen(true); setDeleteError(""); }}>Delete account</button>}{deleteError && <p className="form-error">{deleteError}</p>}</div></div></section>;
 }

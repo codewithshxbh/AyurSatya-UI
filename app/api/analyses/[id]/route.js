@@ -4,6 +4,7 @@ import { loadAnalysisDetail } from "../../../../lib/analysis-history";
 import { supabaseServer } from "../../../../lib/supabase";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(_request, context) {
   const user = await getCurrentUser();

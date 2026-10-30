@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import {
   ChevronDown,
   Menu,
@@ -18,6 +17,7 @@ import {
   HistoryListSkeleton,
   KnowledgeCardSkeleton,
   KnowledgeSkeleton,
+  StatSkeleton,
   OverviewSkeleton,
   ProfileSkeleton,
   ReportSkeleton
@@ -51,6 +51,37 @@ function scrollWorkspaceToTop() {
 function waitAtLeast(startedAt, minimumMs = MIN_SKELETON_MS) {
   const remaining = minimumMs - (Date.now() - startedAt);
   return remaining > 0 ? new Promise((resolve) => setTimeout(resolve, remaining)) : Promise.resolve();
+}
+
+const HISTORY_LIST_TIMEOUT_MS = 12000;
+const HISTORY_DETAIL_TIMEOUT_MS = 25000;
+
+async function fetchJson(url, { timeoutMs = HISTORY_LIST_TIMEOUT_MS, signal } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timer);
+      throw new DOMException("Aborted", "AbortError");
+    }
+    signal.addEventListener("abort", onAbort);
+  }
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Request failed.");
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      if (signal?.aborted) throw error;
+      throw new Error("This is taking too long. Check your connection and try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 function useReveal(minimumMs = MIN_SKELETON_MS) {
@@ -291,33 +322,58 @@ function toHistoryItem(item) {
 }
 
 function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
+  const ready = useReveal();
   const [analyses, setAnalyses] = useState([]);
   const [totalAnalyses, setTotalAnalyses] = useState(0);
   const [validatedAnalyses, setValidatedAnalyses] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
-  const loadOverview = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
     const startedAt = Date.now();
     setHistoryLoading(true);
     setHistoryError("");
-    try {
-      const response = await fetch("/api/analyses", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load analysis history.");
-      setAnalyses(payload.analyses || []);
-      setTotalAnalyses(payload.total ?? payload.analyses?.length ?? 0);
-      setValidatedAnalyses(payload.validated ?? 0);
-    } catch (error) {
-      console.error("Overview analysis lookup failed", error);
-      setHistoryError("Analysis activity is temporarily unavailable.");
-    } finally {
-      await waitAtLeast(startedAt);
-      setHistoryLoading(false);
-    }
+    fetchJson("/api/analyses", { timeoutMs: HISTORY_LIST_TIMEOUT_MS, signal: controller.signal })
+      .then((payload) => {
+        if (cancelled) return;
+        setAnalyses(payload.analyses || []);
+        setTotalAnalyses(payload.total ?? payload.analyses?.length ?? 0);
+        setValidatedAnalyses(payload.validated ?? 0);
+      })
+      .catch((error) => {
+        if (cancelled || error?.name === "AbortError") return;
+        console.error("Overview analysis lookup failed", error);
+        setHistoryError(error.message || "Analysis activity is temporarily unavailable.");
+      })
+      .finally(async () => {
+        await waitAtLeast(startedAt);
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, []);
-  useEffect(() => {
-    loadOverview();
-  }, [loadOverview]);
+  const retryOverview = useCallback(() => {
+    setHistoryLoading(true);
+    setHistoryError("");
+    const startedAt = Date.now();
+    fetchJson("/api/analyses", { timeoutMs: HISTORY_LIST_TIMEOUT_MS })
+      .then((payload) => {
+        setAnalyses(payload.analyses || []);
+        setTotalAnalyses(payload.total ?? payload.analyses?.length ?? 0);
+        setValidatedAnalyses(payload.validated ?? 0);
+      })
+      .catch((error) => {
+        console.error("Overview analysis lookup failed", error);
+        setHistoryError(error.message || "Analysis activity is temporarily unavailable.");
+      })
+      .finally(async () => {
+        await waitAtLeast(startedAt);
+        setHistoryLoading(false);
+      });
+  }, []);
   const now = new Date();
   const dateLabel = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
@@ -327,7 +383,7 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
   }).format(now).toUpperCase();
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  if (historyLoading) return <OverviewSkeleton />;
+  if (!ready) return <OverviewSkeleton />;
   return (
     <section className="page">
       <div className="page-heading">
@@ -339,9 +395,19 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
         <button className="button button-primary" onClick={() => setActiveView("analysis")}>New analysis</button>
       </div>
       <div className="stats">
-        <Stat label="Total analyses" value={totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} />
-        <Stat label="Validated results" value={validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} />
-        <Stat label="Supported classes" value={supportedClasses.length} detail="12 labels from the local dataset" />
+        {historyLoading ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <Stat label="Total analyses" value={totalAnalyses} detail={totalAnalyses ? "Saved crop reports" : "Run your first analysis"} />
+            <Stat label="Validated results" value={validatedAnalyses} detail={validatedAnalyses ? "Reports with model results" : "No saved model reports yet"} />
+            <Stat label="Supported classes" value={supportedClasses.length} detail="12 labels from the local dataset" />
+          </>
+        )}
       </div>
       <div className="section-title">
         <div>
@@ -354,7 +420,9 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
           <span key={item.className} className="class-pill" style={{ "--pill-delay": `${index * 0.35}s` }}>
             <span className="class-pill-glow" aria-hidden="true" />
             <span className="class-pill-inner">
-              <Image className="class-pill-photo" src={item.image} alt="" title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} width={36} height={36} />
+              {/* Class-pill thumbs are 36px local assets; next/image wrappers change wrap across viewports. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="class-pill-photo" src={item.image} alt="" title={`${displayClassLabel(item.className)} from Ahmmed et al., Medicinal Plant Leaf Disease Dataset (CC BY 4.0)`} width={36} height={36} />
               <span className="class-pill-copy">
                 <strong>{item.crop}</strong>
                 <small>{item.condition}</small>
@@ -371,8 +439,10 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
         </div>
         <button className="link-button" onClick={() => setActiveView("history")}>See history</button>
       </div>
-      {historyError ? (
-        <div className="panel empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={loadOverview}>Retry</button></div>
+      {historyLoading ? (
+        <div className="history-card-grid">{[1, 2, 3].map((item) => <AnalysisCardSkeleton key={item} />)}</div>
+      ) : historyError ? (
+        <div className="panel empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={retryOverview}>Retry</button></div>
       ) : analyses.length ? (
         <div className="history-card-grid">
           {analyses.slice(0, 3).map((item, index) => {
@@ -425,8 +495,22 @@ function AnalysisRow({ item, onOpen }) {
   );
 }
 
-function HistoryDetail({ item, onBack, loading }) {
+function HistoryDetail({ item, onBack, loading, error, onRetry }) {
   if (loading) return <ReportSkeleton onBack={onBack} />;
+  if (error) {
+    return (
+      <div className="history-detail">
+        <div className="history-detail-actions">
+          <button className="button button-secondary" type="button" onClick={onBack}>Back to history</button>
+        </div>
+        <div className="panel empty-state">
+          <strong>Unable to load this analysis</strong>
+          <span>{error}</span>
+          <button className="button button-secondary" type="button" onClick={onRetry}>Retry</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="history-detail">
       <div className="history-detail-actions">
@@ -794,12 +878,19 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(initialSelectedItem);
   const [detailLoading, setDetailLoading] = useState(Boolean(initialSelectedItem?.id));
+  const [detailError, setDetailError] = useState("");
+  const [detailTick, setDetailTick] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState("");
+  const [listTick, setListTick] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateRange, setDateRange] = useState("30");
+  const [dateRange, setDateRange] = useState("all");
   useEffect(() => {
     setSelectedItem(initialSelectedItem);
-    if (initialSelectedItem?.id) setDetailLoading(true);
+    if (initialSelectedItem?.id) {
+      setDetailLoading(true);
+      setDetailError("");
+    }
   }, [initialSelectedItem]);
   useLayoutEffect(() => {
     scrollWorkspaceToTop();
@@ -808,14 +899,20 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
     const id = selectedItem?.id;
     if (!id) return undefined;
     let cancelled = false;
+    const controller = new AbortController();
     const startedAt = Date.now();
     setDetailLoading(true);
-    fetch(`/api/analyses/${id}`, { cache: "no-store" })
-      .then((response) => response.json().then((payload) => ({ ok: response.ok, payload })))
-      .then(async ({ ok, payload }) => {
+    setDetailError("");
+    fetchJson(`/api/analyses/${id}`, { timeoutMs: HISTORY_DETAIL_TIMEOUT_MS, signal: controller.signal })
+      .then(async (payload) => {
         await waitAtLeast(startedAt);
-        if (cancelled || !ok || !payload.analysis) return;
+        if (cancelled || !payload.analysis) return;
         setSelectedItem(toHistoryItem(payload.analysis));
+      })
+      .catch(async (error) => {
+        await waitAtLeast(startedAt);
+        if (cancelled || error?.name === "AbortError") return;
+        setDetailError(error.message || "Unable to load this analysis.");
       })
       .finally(async () => {
         await waitAtLeast(startedAt);
@@ -823,18 +920,36 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [selectedItem?.id]);
+  }, [selectedItem?.id, detailTick]);
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
     const startedAt = Date.now();
-    fetch("/api/analyses", { cache: "no-store" }).then((response) => response.json()).then(async ({ analyses }) => {
-      await waitAtLeast(startedAt);
-      if (analyses?.length) setItems(analyses.map(toHistoryItem));
-    }).finally(async () => {
-      await waitAtLeast(startedAt);
-      setLoading(false);
-    });
-  }, [userId]);
+    setLoading(true);
+    setListError("");
+    fetchJson("/api/analyses", { timeoutMs: HISTORY_LIST_TIMEOUT_MS, signal: controller.signal })
+      .then(async (payload) => {
+        await waitAtLeast(startedAt);
+        if (cancelled) return;
+        setItems((payload.analyses || []).map(toHistoryItem));
+      })
+      .catch(async (error) => {
+        await waitAtLeast(startedAt);
+        if (cancelled || error?.name === "AbortError") return;
+        setItems([]);
+        setListError(error.message || "Unable to load analysis history.");
+      })
+      .finally(async () => {
+        await waitAtLeast(startedAt);
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [userId, listTick]);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const cutoff = dateRange === "all" ? 0 : Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000;
   const filteredItems = items.filter((item) => {
@@ -855,7 +970,14 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
         </div>
       )}
       {selectedItem ? (
-        <HistoryDetail key={selectedItem.id} item={selectedItem} loading={detailLoading} onBack={() => { scrollWorkspaceToTop(); setSelectedItem(null); onClearSelectedItem(); }} />
+        <HistoryDetail
+          key={selectedItem.id}
+          item={selectedItem}
+          loading={detailLoading}
+          error={detailError}
+          onRetry={() => setDetailTick((value) => value + 1)}
+          onBack={() => { scrollWorkspaceToTop(); setSelectedItem(null); setDetailError(""); onClearSelectedItem(); }}
+        />
       ) : (
         <div className="history-workspace">
           <div className="panel history-panel">
@@ -866,8 +988,10 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
           </div>
           {loading ? (
             <div className="history-card-grid">{[1, 2, 3, 4, 5, 6].map((item) => <AnalysisCardSkeleton key={item} />)}</div>
+          ) : listError ? (
+            <div className="panel empty-state"><strong>Unable to load analysis history</strong><span>{listError}</span><button className="button button-secondary" type="button" onClick={() => setListTick((value) => value + 1)}>Retry</button></div>
           ) : filteredItems.length ? (
-            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => { scrollWorkspaceToTop(); setDetailLoading(true); setSelectedItem(item); }} />)}</div>
+            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => { scrollWorkspaceToTop(); setDetailLoading(true); setDetailError(""); setSelectedItem(item); }} />)}</div>
           ) : (
             <div className="panel empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>
           )}

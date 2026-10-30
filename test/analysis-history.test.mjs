@@ -15,6 +15,8 @@ function mockClient(result, captured = {}) {
     select(columns, options) {
       captured.select = columns;
       captured.options = options;
+      captured.selects = captured.selects || [];
+      captured.selects.push({ columns, options });
       return builder;
     },
     eq(column, value) {
@@ -75,7 +77,7 @@ test("list rows use crop_name without loading heatmaps", () => {
   assert.equal(row.result.visual.explainability, undefined);
 });
 
-test("history lookup uses one indexed user query and maps timeouts", async () => {
+test("history lookup uses a light list query and maps timeouts", async () => {
   const captured = {};
   const client = mockClient({
     data: [{ id: "a", crop_name: "Tulsi", image_path: null, created_at: "2026-10-30T00:00:00.000Z" }],
@@ -84,8 +86,9 @@ test("history lookup uses one indexed user query and maps timeouts", async () =>
   }, captured);
   const loaded = await loadAnalysisHistory(client, "user-1");
   assert.equal(captured.table, "analyses");
-  assert.equal(captured.select, ANALYSIS_LIST_COLUMNS);
-  assert.deepEqual(captured.filters, [["user_id", "user-1"]]);
+  assert.equal(captured.selects[0].columns, ANALYSIS_LIST_COLUMNS);
+  assert.equal(captured.selects[0].options, undefined);
+  assert.deepEqual(captured.filters, [["user_id", "user-1"], ["user_id", "user-1"]]);
   assert.equal(captured.limit, 20);
   assert.equal(loaded.total, 1);
   assert.equal(loaded.validated, 1);

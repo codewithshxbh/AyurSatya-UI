@@ -17,7 +17,7 @@ function HeadingSkeleton({ compact = false, action = false }) {
   );
 }
 
-function StatSkeleton() {
+export function StatSkeleton() {
   return (
     <div className="stat" aria-hidden="true">
       <span className="skeleton skeleton-line skeleton-line-sm" />

@@ -10,6 +10,14 @@ import {
 } from "lucide-react";
 import { combineKnowledgeText, parseLabeledInformation } from "../lib/knowledge-filters.mjs";
 import { analyzeSatelliteCoordinates } from "../lib/field-location";
+import {
+  CAMERA_FACING,
+  captureVideoFrame,
+  mapCameraError,
+  nextCameraFacing,
+  requestCameraStream,
+  stopMediaStream
+} from "../lib/camera-capture";
 import { displayClassLabel, humanizeUserText, parsePredictedClass, SUPPORTED_CLASS_LABELS } from "../lib/prediction-result";
 import {
   AnalysisCardSkeleton,
@@ -541,6 +549,11 @@ function getAnalysisImageUrls(item) {
 
 function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, analysisResult, setAnalysisResult, analysisLoading, setAnalysisLoading, storageStatus, setStorageStatus }) {
   const ready = useReveal();
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [facingMode, setFacingMode] = useState(CAMERA_FACING.ENVIRONMENT);
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
   const [locationConfirmed, setLocationConfirmed] = useState(false);
@@ -548,6 +561,56 @@ function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, 
   const [provider, setProvider] = useState("colab");
   const [colabStatus, setColabStatus] = useState("");
   const [colabChecking, setColabChecking] = useState(false);
+  function closeCamera() {
+    stopMediaStream(streamRef.current);
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraActive(false);
+    setCameraBusy(false);
+  }
+  function takeFile(nextFile) {
+    closeCamera();
+    chooseFile(nextFile);
+  }
+  async function startCamera(nextFacing = facingMode) {
+    setUploadMessage("");
+    setCameraBusy(true);
+    stopMediaStream(streamRef.current);
+    streamRef.current = null;
+    try {
+      const stream = await requestCameraStream(undefined, nextFacing);
+      streamRef.current = stream;
+      setFacingMode(nextFacing);
+      setCameraActive(true);
+    } catch (error) {
+      stopMediaStream(streamRef.current);
+      streamRef.current = null;
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraActive(false);
+      setUploadMessage(mapCameraError(error));
+    } finally {
+      setCameraBusy(false);
+    }
+  }
+  async function capturePhoto() {
+    setCameraBusy(true);
+    try {
+      const captured = await captureVideoFrame(videoRef.current);
+      takeFile(captured);
+    } catch (error) {
+      setUploadMessage(mapCameraError(error));
+      setCameraBusy(false);
+    }
+  }
+  useLayoutEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !cameraActive || !stream) return undefined;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+    return undefined;
+  }, [cameraActive, facingMode]);
+  useEffect(() => () => stopMediaStream(streamRef.current), []);
   async function checkColabStatus() {
     setColabChecking(true);
     try {
@@ -624,8 +687,8 @@ function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, 
       <div className="page-heading compact-heading">
         <div>
           <p className="overline">NEW ANALYSIS</p>
-          <h1>{analysisResult ? "Leaf assessment." : "Upload a leaf image."}</h1>
-          <p className="lead">{analysisResult ? "Image classification, botanical references, and satellite observations are shown as separate evidence." : "Automatic identification currently supports 12 classes across Neem, Tulsi, and Kalanchoe (PatharKuchi, Kalanchoe pinnata). You do not need to select a plant first."}</p>
+          <h1>{analysisResult ? "Leaf assessment." : "Add a leaf image."}</h1>
+          <p className="lead">{analysisResult ? "Image classification, botanical references, and satellite observations are shown as separate evidence." : "Upload a photo or capture one with the camera. Automatic identification currently supports 12 classes across Neem, Tulsi, and Kalanchoe (PatharKuchi, Kalanchoe pinnata)."}</p>
         </div>
       </div>
       {analysisResult ? (
@@ -634,13 +697,45 @@ function Analysis({ file, preview, chooseFile, uploadMessage, setUploadMessage, 
         <div className="analysis-workspace">
           <div className="panel upload-panel">
             <div className="upload-grid">
-              <div className={`dropzone ${preview ? "has-preview" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}>
-                <input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => chooseFile(event.target.files[0])} />
-                <label htmlFor="image-upload">{preview ? (
-                  // File-picker preview uses a blob: object URL that next/image cannot load.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={preview} alt="Selected leaf preview" />
-                ) : <><strong>Upload leaf image</strong><span>The model will detect Neem, Tulsi, or Kalanchoe from the image</span><small>JPG or PNG, up to 10 MB</small></>}</label>
+              <div className="image-source">
+                <div
+                  className={`dropzone ${preview && !cameraActive ? "has-preview" : ""} ${cameraActive ? "is-camera" : ""}`}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => { event.preventDefault(); takeFile(event.dataTransfer.files[0]); }}
+                >
+                  <input id="image-upload" type="file" accept="image/jpeg,image/png" onChange={(event) => { takeFile(event.target.files[0]); event.target.value = ""; }} />
+                  {cameraActive ? (
+                    <>
+                      <video ref={videoRef} className="camera-preview" autoPlay playsInline muted />
+                      <div className="camera-toolbar">
+                        <button className="button button-primary" type="button" onClick={capturePhoto} disabled={cameraBusy}>{cameraBusy ? "Capturing..." : "Capture photo"}</button>
+                        <button className="button button-secondary" type="button" onClick={() => startCamera(nextCameraFacing(facingMode))} disabled={cameraBusy}>Switch camera</button>
+                        <button className="button button-ghost" type="button" onClick={closeCamera} disabled={cameraBusy}>Cancel</button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="dropzone-empty">
+                      {preview ? (
+                        <label htmlFor="image-upload">
+                          {/* File-picker preview uses a blob: object URL that next/image cannot load. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={preview} alt="Selected leaf preview" />
+                        </label>
+                      ) : (
+                        <>
+                          <strong>{cameraBusy ? "Opening camera..." : "Add a leaf image"}</strong>
+                          <span>The model will detect Neem, Tulsi, or Kalanchoe from the image</span>
+                        </>
+                      )}
+                      <p className="dropzone-choice">
+                        <label htmlFor="image-upload">Upload image</label>
+                        <span> or </span>
+                        <button type="button" onClick={() => startCamera()} disabled={cameraBusy || analysisLoading}>{cameraBusy ? "Opening camera..." : "Use camera"}</button>
+                      </p>
+                      {!preview && <small>JPG or PNG, up to 10 MB</small>}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="upload-controls">
                 <FilterSelect

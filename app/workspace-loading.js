@@ -202,7 +202,9 @@ export function AnalysisSkeleton() {
       <div className="analysis-workspace">
         <div className="panel upload-panel">
           <div className="upload-grid">
-            <div className="dropzone" aria-hidden="true"><span className="skeleton skeleton-fill" /></div>
+            <div className="image-source">
+              <div className="dropzone" aria-hidden="true"><span className="skeleton skeleton-fill" /></div>
+            </div>
             <div className="upload-controls" aria-hidden="true">
               <span className="skeleton skeleton-line skeleton-line-xs" />
               <span className="skeleton skeleton-filter" />

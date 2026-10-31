@@ -614,8 +614,8 @@ html,body,.app-shell,.main,.page,.history-detail{overflow-anchor:none}
   .skeleton-search{width:100%}
 }
 .class-pill-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;align-items:stretch}
-.class-pill{position:relative;display:flex;width:100%;min-width:0;isolation:isolate;padding:2px;border-radius:18px;overflow:hidden;pointer-events:none;user-select:none;box-shadow:0 10px 18px rgba(30,90,140,.1),0 1px 0 rgba(255,255,255,.7) inset}
-.class-pill-glow{position:absolute;inset:-180%;background:conic-gradient(from 0deg,#125d99,#2b8fd4,#7dd3fc,#e3f1fb,#38bdf8,#1c73b3,#125d99);animation:class-pill-spin 3.6s linear infinite;animation-delay:var(--pill-delay,0s);z-index:0}
+.class-pill{position:relative;display:flex;width:100%;min-width:0;isolation:isolate;padding:2.5px;border-radius:18px;overflow:hidden;pointer-events:none;user-select:none;box-shadow:0 10px 18px rgba(30,90,140,.1),0 1px 0 rgba(255,255,255,.7) inset}
+.class-pill-glow{position:absolute;inset:-200%;background:conic-gradient(from 0deg,#0b4f86 0%,#7dd3fc 22%,#125d99 48%,#e8f4fc 72%,#0b4f86 100%);animation:class-pill-spin 2.8s linear infinite;animation-delay:var(--pill-delay,0s);z-index:0}
 .class-pill-inner{position:relative;z-index:1;display:flex;align-items:center;gap:8px;width:100%;min-width:0;min-height:48px;padding:8px 12px 8px 8px;border-radius:16px;background:linear-gradient(180deg,#fff 0%,#eef6fc 55%,#e3f1fb 100%);box-shadow:0 1px 0 rgba(255,255,255,.9) inset}
 .class-pill-photo{width:36px;height:36px;border-radius:12px;object-fit:cover;flex:none;background:#dceaf4;display:block}
 .class-pill-copy{display:grid;gap:1px;min-width:0;flex:1;padding-right:2px}
@@ -626,7 +626,6 @@ html,body,.app-shell,.main,.page,.history-detail{overflow-anchor:none}
 .class-pill-loading .class-pill-copy{gap:6px}
 @keyframes class-pill-spin{to{transform:rotate(1turn)}}
 @media(max-width:680px){.class-pill-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(prefers-reduced-motion:reduce){.class-pill-glow{animation:none;background:linear-gradient(135deg,#125d99,#2b8fd4,#7dd3fc,#2b8fd4)}}
 .image-source{display:grid;min-width:0;align-content:start}
 .dropzone-empty{height:100%;min-height:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:20px;text-align:center}
 .dropzone-empty strong{font:600 12px/1.35 "DM Sans",sans-serif;color:#1e3d52}

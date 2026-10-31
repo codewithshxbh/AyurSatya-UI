@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Menu,
   Search,
+  Trash2,
   X
 } from "lucide-react";
 import { combineKnowledgeText, parseLabeledInformation } from "../lib/knowledge-filters.mjs";
@@ -64,7 +65,7 @@ function waitAtLeast(startedAt, minimumMs = MIN_SKELETON_MS) {
 const HISTORY_LIST_TIMEOUT_MS = 12000;
 const HISTORY_DETAIL_TIMEOUT_MS = 25000;
 
-async function fetchJson(url, { timeoutMs = HISTORY_LIST_TIMEOUT_MS, signal } = {}) {
+async function fetchJson(url, { timeoutMs = HISTORY_LIST_TIMEOUT_MS, signal, method = "GET" } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onAbort = () => controller.abort();
@@ -76,7 +77,7 @@ async function fetchJson(url, { timeoutMs = HISTORY_LIST_TIMEOUT_MS, signal } = 
     signal.addEventListener("abort", onAbort);
   }
   try {
-    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const response = await fetch(url, { method, cache: "no-store", signal: controller.signal });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Request failed.");
     return payload;
@@ -336,6 +337,8 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
   const [validatedAnalyses, setValidatedAnalyses] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deletingId, setDeletingId] = useState("");
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
@@ -362,6 +365,22 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
       cancelled = true;
       controller.abort();
     };
+  }, []);
+  const deleteOverviewAnalysis = useCallback(async (item) => {
+    if (!item?.id) return;
+    setDeletingId(item.id);
+    setDeleteError("");
+    try {
+      await fetchJson(`/api/analyses/${item.id}`, { method: "DELETE", timeoutMs: HISTORY_LIST_TIMEOUT_MS });
+      setAnalyses((current) => current.filter((row) => row.id !== item.id));
+      setTotalAnalyses((current) => Math.max(0, current - 1));
+      setValidatedAnalyses((current) => Math.max(0, current - 1));
+    } catch (error) {
+      console.error("Overview analysis delete failed", error);
+      setDeleteError(error.message || "Unable to delete this analysis.");
+    } finally {
+      setDeletingId("");
+    }
   }, []);
   const retryOverview = useCallback(() => {
     setHistoryLoading(true);
@@ -452,12 +471,23 @@ function Overview({ firstName, setActiveView, onOpenHistoryItem }) {
       ) : historyError ? (
         <div className="panel empty-state"><strong>Unable to load recent analyses</strong><span>{historyError}</span><button className="button button-secondary" onClick={retryOverview}>Retry</button></div>
       ) : analyses.length ? (
-        <div className="history-card-grid">
-          {analyses.slice(0, 3).map((item, index) => {
-            const historyItem = toHistoryItem(item);
-            return <AnalysisRow key={historyItem.id || `${historyItem.crop}-${index}`} item={historyItem} onOpen={() => onOpenHistoryItem(historyItem)} />;
-          })}
-        </div>
+        <>
+          {deleteError && <p className="form-error">{deleteError}</p>}
+          <div className="history-card-grid">
+            {analyses.slice(0, 3).map((item, index) => {
+              const historyItem = toHistoryItem(item);
+              return (
+                <AnalysisRow
+                  key={historyItem.id || `${historyItem.crop}-${index}`}
+                  item={historyItem}
+                  deleting={deletingId === historyItem.id}
+                  onOpen={() => onOpenHistoryItem(historyItem)}
+                  onDelete={() => deleteOverviewAnalysis(historyItem)}
+                />
+              );
+            })}
+          </div>
+        </>
       ) : (
         <div className="panel empty-state"><strong>No analyses saved yet</strong><span>Run an image analysis to create your first report.</span></div>
       )}
@@ -483,27 +513,39 @@ function Stat({ label, value, detail }) {
   );
 }
 
-function AnalysisRow({ item, onOpen }) {
+function AnalysisRow({ item, onOpen, onDelete, deleting = false }) {
+  const [confirming, setConfirming] = useState(false);
   return (
-    <button className="analysis-card" type="button" onClick={onOpen} aria-label={`Open ${item.crop} analysis from ${item.date}`}>
-      <div className={`analysis-card-media ${item.color}`}>
-        {item.imageUrls?.[0] ? (
-          // History thumbs are Cloudinary or other stored URLs, not static public paths.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} />
-        ) : <span>No image</span>}
-      </div>
-      <div className="analysis-card-body">
-        <strong>{item.crop}</strong>
-        <small>{item.status}</small>
-        <span>{item.date}{item.imageUrls?.length > 1 ? ` · ${item.imageUrls.length} images` : ""}</span>
-        <b>{item.confidence}</b>
-      </div>
-    </button>
+    <article className="analysis-card">
+      <button className="analysis-card-open" type="button" onClick={onOpen} aria-label={`Open ${item.crop} analysis from ${item.date}`}>
+        <div className={`analysis-card-media ${item.color}`}>
+          {item.imageUrls?.[0] ? (
+            // History thumbs are Cloudinary or other stored URLs, not static public paths.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.imageUrls[0]} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} />
+          ) : <span>No image</span>}
+        </div>
+        <div className="analysis-card-body">
+          <strong>{item.crop}</strong>
+          <small>{item.status}</small>
+          <span>{item.date}{item.imageUrls?.length > 1 ? ` · ${item.imageUrls.length} images` : ""}</span>
+          <b>{item.confidence}</b>
+        </div>
+      </button>
+      {confirming ? (
+        <div className="analysis-card-confirm">
+          <button type="button" className="analysis-card-delete" onClick={() => onDelete(item)} disabled={deleting} aria-label={deleting ? "Deleting analysis" : `Confirm delete ${item.crop} analysis`}><Trash2 size={16} strokeWidth={2} /></button>
+          <button type="button" className="analysis-card-keep" onClick={() => setConfirming(false)} disabled={deleting}>Keep</button>
+        </div>
+      ) : (
+        <button type="button" className="analysis-card-delete" onClick={() => setConfirming(true)} disabled={deleting} aria-label={`Delete ${item.crop} analysis from ${item.date}`}><Trash2 size={16} strokeWidth={2} /></button>
+      )}
+    </article>
   );
 }
 
-function HistoryDetail({ item, onBack, loading, error, onRetry }) {
+function HistoryDetail({ item, onBack, loading, error, deleteError, onRetry, onDelete, deleting = false }) {
+  const [confirming, setConfirming] = useState(false);
   if (loading) return <ReportSkeleton onBack={onBack} />;
   if (error) {
     return (
@@ -523,8 +565,19 @@ function HistoryDetail({ item, onBack, loading, error, onRetry }) {
     <div className="history-detail">
       <div className="history-detail-actions">
         <button className="button button-secondary" type="button" onClick={onBack}>Back to history</button>
-        <span className="status review">Saved analysis</span>
+        <div className="history-detail-tools">
+          {confirming ? (
+            <>
+              <button className="analysis-card-keep" type="button" onClick={() => setConfirming(false)} disabled={deleting}>Keep</button>
+              <button className="analysis-card-delete history-detail-delete" type="button" onClick={() => onDelete(item)} disabled={deleting} aria-label={deleting ? "Deleting analysis" : "Confirm delete this analysis"}><Trash2 size={16} strokeWidth={2} /></button>
+            </>
+          ) : (
+            <button className="analysis-card-delete history-detail-delete" type="button" onClick={() => setConfirming(true)} disabled={deleting} aria-label="Delete this analysis"><Trash2 size={16} strokeWidth={2} /></button>
+          )}
+          <span className="status review">Saved analysis</span>
+        </div>
       </div>
+      {deleteError && <p className="form-error">{deleteError}</p>}
       <AssessmentReport result={item.result || {}} preview={item.imageUrls?.[0] || ""} imageFallback={item} />
     </div>
   );
@@ -980,6 +1033,27 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
   const [listTick, setListTick] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState("all");
+  const [deletingId, setDeletingId] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  async function deleteHistoryItem(item) {
+    if (!item?.id) return;
+    setDeletingId(item.id);
+    setDeleteError("");
+    try {
+      await fetchJson(`/api/analyses/${item.id}`, { method: "DELETE", timeoutMs: HISTORY_LIST_TIMEOUT_MS });
+      setItems((current) => current.filter((row) => row.id !== item.id));
+      if (selectedItem?.id === item.id) {
+        scrollWorkspaceToTop();
+        setSelectedItem(null);
+        setDetailError("");
+        onClearSelectedItem();
+      }
+    } catch (error) {
+      setDeleteError(error.message || "Unable to delete this analysis.");
+    } finally {
+      setDeletingId("");
+    }
+  }
   useEffect(() => {
     setSelectedItem(initialSelectedItem);
     if (initialSelectedItem?.id) {
@@ -1070,8 +1144,11 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
           item={selectedItem}
           loading={detailLoading}
           error={detailError}
+          deleteError={deleteError}
+          deleting={deletingId === selectedItem.id}
+          onDelete={deleteHistoryItem}
           onRetry={() => setDetailTick((value) => value + 1)}
-          onBack={() => { scrollWorkspaceToTop(); setSelectedItem(null); setDetailError(""); onClearSelectedItem(); }}
+          onBack={() => { scrollWorkspaceToTop(); setSelectedItem(null); setDetailError(""); setDeleteError(""); onClearSelectedItem(); }}
         />
       ) : (
         <div className="history-workspace">
@@ -1086,7 +1163,10 @@ function HistoryView({ userId, initialSelectedItem, onClearSelectedItem }) {
           ) : listError ? (
             <div className="panel empty-state"><strong>Unable to load analysis history</strong><span>{listError}</span><button className="button button-secondary" type="button" onClick={() => setListTick((value) => value + 1)}>Retry</button></div>
           ) : filteredItems.length ? (
-            <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} onOpen={() => { scrollWorkspaceToTop(); setDetailLoading(true); setDetailError(""); setSelectedItem(item); }} />)}</div>
+            <>
+              {deleteError && <p className="form-error">{deleteError}</p>}
+              <div className="history-card-grid">{filteredItems.map((item, index) => <AnalysisRow key={item.id || `${item.crop}-${index}`} item={item} deleting={deletingId === item.id} onDelete={deleteHistoryItem} onOpen={() => { scrollWorkspaceToTop(); setDetailLoading(true); setDetailError(""); setDeleteError(""); setSelectedItem(item); }} />)}</div>
+            </>
           ) : (
             <div className="panel empty-state"><strong>{items.length ? "No matching analyses" : "No analyses yet"}</strong><span>{items.length ? "Try a different search or date range." : "Run your first crop analysis to see it here."}</span></div>
           )}

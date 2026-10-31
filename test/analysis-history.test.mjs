@@ -5,6 +5,7 @@ import {
   ANALYSIS_LIST_COLUMNS,
   isAnalysisId,
   isStatementTimeout,
+  deleteAnalysis,
   loadAnalysisDetail,
   loadAnalysisHistory,
   presentAnalysisListRow
@@ -30,6 +31,10 @@ function mockClient(result, captured = {}) {
     },
     limit(value) {
       captured.limit = value;
+      return builder;
+    },
+    delete() {
+      captured.delete = true;
       return builder;
     },
     maybeSingle() {
@@ -122,4 +127,23 @@ test("detail lookup is scoped to the current user", async () => {
   assert.deepEqual(captured.filters, [["id", id], ["user_id", "user-1"]]);
   assert.equal(loaded.status, 200);
   assert.equal(loaded.analysis.result.visual.condition, "Healthy");
+});
+
+test("delete is scoped to the current user and never reads the JSONB result", async () => {
+  const captured = {};
+  const id = "3f1c0a7e-2b8d-4a11-9c4e-1d2f3a4b5c6d";
+  const client = mockClient({ data: { id }, error: null }, captured);
+  const deleted = await deleteAnalysis(client, "user-1", id);
+  assert.equal(captured.delete, true);
+  assert.equal(captured.select, "id");
+  assert.deepEqual(captured.filters, [["id", id], ["user_id", "user-1"]]);
+  assert.equal(deleted.deleted, true);
+  assert.equal(deleted.id, id);
+
+  const missing = await deleteAnalysis(mockClient({ data: null, error: null }), "user-1", id);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.deleted, false);
+
+  const invalid = await deleteAnalysis(mockClient({ data: null, error: null }), "user-1", "not-an-id");
+  assert.equal(invalid.status, 400);
 });
